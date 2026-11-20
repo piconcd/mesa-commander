@@ -1,0 +1,8 @@
+.git
+.env
+node_modules
+*.zip
+*.log
+README.md
+scripts
+deploy

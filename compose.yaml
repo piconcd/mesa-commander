@@ -1,0 +1,61 @@
+services:
+  commander:
+    build: .
+    restart: unless-stopped
+    init: true
+    environment:
+      INVITE_PASSWORD: ${INVITE_PASSWORD:?Configura una contraseña de al menos 12 caracteres en .env}
+      TURN_URLS: ${TURN_URLS:-}
+      TURN_SHARED_SECRET: ${TURN_SHARED_SECRET:-}
+      STUN_URLS: ${STUN_URLS:-stun:stun.l.google.com:19302}
+    shm_size: 1gb
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - commander_data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+  turn:
+    profiles: ["turn"]
+    image: coturn/coturn:4.19.1-alpine
+    restart: unless-stopped
+    # Linux Docker host networking, so UDP relay ports are reachable.
+    network_mode: host
+    command:
+      - "-n"
+      - "--log-file=stdout"
+      - "--no-cli"
+      - "--fingerprint"
+      - "--no-multicast-peers"
+      - "--realm=${TURN_REALM:-commander.invalid}"
+      - "--use-auth-secret"
+      - "--static-auth-secret=${TURN_SHARED_SECRET:-set-a-strong-secret-before-enabling-turn}"
+      - "--external-ip=${TURN_PUBLIC_IP:-127.0.0.1}"
+      - "--listening-port=3478"
+      - "--min-port=49160"
+      - "--max-port=49200"
+      - "--no-tls"
+      - "--no-dtls"
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - commander
+    environment:
+      DOMAIN: ${DOMAIN:?Configura DOMAIN en .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  commander_data:
+  caddy_data:
+  caddy_config:

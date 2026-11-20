@@ -1,0 +1,6 @@
+{
+  "roomName": "Mesa Commander",
+  "minimumPlayers": 2,
+  "code": "SERVER",
+  "voiceEnabled": true
+}
