@@ -1,172 +1,99 @@
-# Mesa Commander central - prototipo experimental
+# 🃏 Mesa Commander
 
-Este repositorio contiene **una adaptación experimental**, no un lanzamiento de producción validado.
-La partida se ejecuta en Chromium **dentro de Docker** y Node.js recibe a los jugadores
-por WebSocket, con Caddy como proxy inverso HTTPS. Reutiliza la lógica original del HTML.
-PeerJS ya no es necesario para el juego centralizado. **La voz es opcional y usa WebRTC** entre los navegadores; Node.js solamente transmite mensajes de negociación.
+**Mesa Commander** es un proyecto colaborativo para jugar a **Magic: The Gathering — Commander** por Internet, desde el navegador y con amigos. La partida se ejecuta en un servidor propio, por lo que ningún jugador necesita mantener abierto su ordenador para actuar como anfitrión.
 
-**Pruebas realizadas:** el motor ha iniciado partidas con 2 y 4 asientos humanos
-simulados en Chromium local, enviando las vistas y eventos de inicio para cada
-asiento sin errores de JavaScript. También se simuló un cliente que envía su
-contraseña, se conecta, carga el mazo y recibe la orden de inicio. No se ha podido compilar la imagen Docker
-en este entorno ni validar todavía una sesión real entre distintos hogares.
+Actualmente lo alojamos en una **Raspberry Pi 5 con Docker**. Se accede mediante una dirección HTTPS compartida por el administrador y una contraseña de invitación. **Es un proyecto experimental**: estamos probando y mejorando el multijugador, las reconexiones y la seguridad.
 
-## Características
+## ✨ Funcionalidades
 
-- Los cuatro asientos pueden pertenecer a jugadores desde distintos domicilios.
-- El primero que se conecte ocupa el asiento 1 y tiene el botón **Empezar partida**.
-- Los demás entran desde la misma URL. Si hay 2-3 jugadores, los asientos vacíos son bots.
-- Cada jugador puede elegir uno de sus mazos; importar mazos antes de entrar.
-- El juego mantiene checkpoints en el perfil persistente del navegador del servidor.
-- El servidor consulta Scryfall desde su propio Chromium.
-- `scripts/update-from-github.sh` busca nuevas versiones y **no reinicia** con partidas activas ni personas conectadas al canal de voz.
+- **Hasta cuatro jugadores humanos** desde distintas casas, en una misma mesa. Los asientos libres pueden ocuparse con bots.
+- **Partidas de Commander** con gestión de cartas, turnos, mesa, acciones y registro de la partida.
+- **Importación y selección de mazos**, con información de cartas obtenida mediante **Scryfall**.
+- **Chat de voz opcional** dentro del juego: unirse, silenciar el micrófono y salir del canal. Usa WebRTC y requiere permiso de micrófono.
+- **Servidor centralizado** con Node.js, WebSockets y un motor de juego ejecutado en Chromium dentro de Docker.
+- **Guardado de puntos de recuperación** de la partida. No garantiza restaurar cada acción si se produce un apagado inesperado.
+- **Actualizaciones desde GitHub**: el servidor comprueba la rama `main` cada día a las **07:00 (Europe/Madrid)** y despliega cambios si no hay una partida activa ni usuarios en voz.
 
-## Poner en marcha
+> **Estado del proyecto:** la interfaz y el motor funcionan, pero todavía faltan pruebas completas con varios jugadores reales, recuperación ante fallos y endurecimiento de la seguridad. El chat de voz puede necesitar un servidor TURN para algunas redes.
 
-Requisitos: Docker Compose, Git y un dominio propio con DNS hacia tu servidor.
-Es necesario que los puertos TCP 80 y 443 sean alcanzables desde Internet. Los clientes
-utilizan HTTPS/WSS, así que no hace falta publicar el puerto 3000.
+## 🎮 Cómo jugar
 
-```bash
-git clone git@github.com:TU_USUARIO/TU_REPO.git /opt/mesa-commander
-cd /opt/mesa-commander
-cp .env.example .env
-# Edita DOMAIN=commander.tudominio.com
-docker compose up -d --build
-```
+1. Pide al administrador la **dirección HTTPS** de Mesa Commander y la **contraseña de invitación**.
+2. Abre el enlace desde un navegador actualizado, escribe tu nombre y entra a la mesa.
+3. Importa o selecciona tu mazo. El primer jugador conectado puede iniciar la partida cuando haya suficientes jugadores preparados (mínimo configurable entre 2 y 4).
+4. Si quieres hablar, pulsa **«Unirse a voz»**, concede permiso al micrófono y utiliza los controles para silenciarte o salir. Es opcional.
 
-Configura una contraseña larga en `.env` como `INVITE_PASSWORD` y compártela
-solo con tus amigos; no subas `.env` al repositorio. Cada jugador la introduce
-al entrar y se guarda únicamente durante su sesión de navegador.
+No necesitas instalar Docker, Tailscale ni el juego en tu ordenador para jugar. Si el audio no conecta, puedes seguir jugando sin voz.
 
-Edita `config/game.json` y sube los cambios a GitHub para modificar el nombre de mesa,
-el código de sala, el número mínimo de jugadores (entre 2 y 4) y `voiceEnabled`.
+## 🤝 ¿Quieres colaborar?
 
-## Canal de voz integrado (opcional)
+¡Las propuestas de cambios, informes de errores y mejoras son bienvenidas! El código está en este repositorio privado: **[piconcd/mesa-commander](https://github.com/piconcd/mesa-commander)**.
 
-Cada persona **primero entra al servidor de juego**. En la barra superior aparece
-**🎙️ Unirse a voz**. Al pulsar, el navegador solicita permiso para usar el micrófono.
-El audio se reproduce desde los demás jugadores que también hayan entrado al
-canal. El panel muestra quién está en voz y permite **Silenciar micrófono**,
-**Activar sonido** (por si el navegador impide reproducir automáticamente) y
-**Salir del canal**, sin tener que abandonar la mesa.
+### 1. Consigue acceso al repositorio
 
-- Es voluntario: **entrar al juego NO abre el micrófono**. El botón está disponible
-  en la sala de espera y durante la partida, solo para clientes con asiento.
-- Hasta cuatro usuarios: audio WebRTC de navegador a navegador, cifrado de
-  extremo a extremo en tránsito mediante DTLS-SRTP. El servidor Node solo
-  señaliza; **no graba ni procesa el audio**.
-- **Se necesita HTTPS** (o localhost para pruebas) y permiso de micrófono.
-- Conexión directa mediante STUN en redes domésticas que lo permiten; para
-  NAT/firewalls restrictivos, prepara el TURN opcional de abajo.
-- Si se corta la conexión con el servidor, el navegador deja de usar el
-  micrófono y deberás entrar de nuevo en el canal tras reconectar.
+Pide a la persona administradora que te invite como colaborador en GitHub y acepta la invitación. Necesitarás una cuenta de GitHub; **no necesitas acceso SSH a la Raspberry**.
 
-### TURN propio en Docker (opcional pero recomendado para amigos en distintas casas)
+### 2. Elige qué mejorar
 
-STUN solo no garantiza llamadas desde todas las conexiones residenciales.
-Se incluye Coturn como **perfil Docker optativo** que puede retransmitir audio
-cuando WebRTC no logra la conexión directa. En un host Linux con IP pública:
+| Quiero cambiar… | Archivo o carpeta |
+| --- | --- |
+| Nombre de la mesa, código, mínimo de jugadores o activación de la voz | `config/game.json` |
+| Apariencia, interfaz y lógica original del juego | `app/index.html` |
+| Comunicación y servidor centralizado | `server/` |
+| Instrucciones del proyecto | `README.md` |
+| Contenedores y despliegue | `compose.yaml`, `Dockerfile`, `deploy/`, `scripts/` |
 
-1. Genera un secreto aleatorio de al menos 32 caracteres: `openssl rand -hex 32`.
-2. En tu `.env`, descomenta y completa las variables siguientes (con el **mismo**
-   secreto para ambos servicios):
+### 3. Propón tu cambio (sin usar la terminal)
 
-```dotenv
-COMPOSE_PROFILES=turn
-TURN_PUBLIC_IP=TU_IP_PUBLICA
-TURN_REALM=commander.tudominio.com
-TURN_SHARED_SECRET=PEGA_EL_SECRETO_GENERADO
-TURN_URLS=turn:commander.tudominio.com:3478?transport=udp,turn:commander.tudominio.com:3478?transport=tcp
-```
+1. En GitHub, abre el archivo que quieras editar y pulsa el **icono del lápiz**.
+2. Realiza los cambios y selecciona la opción de **crear una rama nueva** en lugar de modificar directamente `main`.
+3. Guarda el cambio (*Commit changes*) y abre un **Pull Request** explicando qué has cambiado y por qué.
+4. El administrador revisará la propuesta. Si la aprueba, la incorporará a `main`.
+5. El servidor comprobará los cambios en su siguiente ejecución programada y los aplicará cuando sea seguro reiniciar.
 
-3. El DNS de `commander.tudominio.com` debe resolver a tu servidor. Abre o
-   redirige hacia él **TCP/UDP 3478 y UDP 49160–49200** además de TCP 80/443.
-4. Ejecuta `docker compose up -d --build` y comprueba `docker compose logs turn`.
+También puedes trabajar con **GitHub Desktop** o Git desde tu ordenador: clona el repositorio, crea una rama, modifica los archivos, haz *commit*, publica la rama y abre un Pull Request.
 
-El servicio TURN usa `network_mode: host`, recomendado para servidores Docker
-Linux, y necesita una IP pública correcta. Si estás tras CG-NAT, usa un VPS
-público u otro servidor TURN accesible. Las credenciales TURN se generan en
-Node.js para cada jugador autenticado, con caducidad de 24 horas; el secreto
-compartido solo se guarda en `.env`, nunca se envía al navegador.
+**Para ayudarnos a revisar tu Pull Request**, explica brevemente el objetivo, los archivos modificados, cómo has probado el cambio y, si afecta a la interfaz, añade una captura de pantalla. Para reportar fallos, abre una **Issue** con los pasos para reproducirlo, el comportamiento esperado y lo que ocurrió.
 
-Puedes desactivar el canal del todo usando `"voiceEnabled": false` en
-`config/game.json`. No se necesita Discord ni cuentas adicionales.
+### Reglas importantes para colaborar
 
-**Limitación de pruebas de voz:** se han verificado sintaxis, estructura e
-integración, pero el entorno de pruebas no ha permitido abrir una llamada
-WebRTC real entre dos navegadores. Prueba micrófono, auriculares, silenciamiento
-y recuperación de conexión con tus amigos antes de depender del canal.
+- **No subas contraseñas, claves privadas, tokens ni el archivo `.env`**. Usa `.env.example` únicamente para documentar variables sin secretos.
+- Evita subir mazos privados, datos personales y archivos de las partidas.
+- No hagas cambios directamente en `main`: utiliza ramas y Pull Requests.
+- Los cambios incorporados a `main` pueden terminar ejecutándose en la Raspberry: revisaremos especialmente los que afecten al servidor, Docker o scripts.
+- No compartas públicamente el enlace del juego ni su contraseña sin permiso del administrador.
 
+## 🛠️ Administración del servidor
 
-El primero que entre abre `https://commander.tudominio.com`, importa su mazo
-(opcional), pulsa «Entrar al servidor», indica su nombre y elige mazo.
-Cuando los demás estén conectados, pulsa «Empezar partida».
-El primer jugador puede iniciar otra partida desde «Nueva partida» cuando
-termine la anterior.
+El proyecto está desplegado en una Raspberry Pi 5 (`aarch64`) con Docker Compose. **Tailscale Funnel** proporciona el acceso HTTPS sin necesidad de comprar un dominio o abrir puertos del router. El servicio `commander` escucha solo en `127.0.0.1:3000` del anfitrión; no es necesario levantar el servicio opcional `caddy` cuando se usa Funnel.
 
-Las partidas en curso se mantienen mientras el contenedor y Chromium siguen vivos.
-Un reinicio recupera el último checkpoint guardado, no todos los movimientos posteriores.
-**No hay garantía de recuperación exacta ante cierre abrupto o fallos**.
-
-## Configurar actualización automática a las 07:00 Europe/Madrid
-
-El host Linux debe tener `git`, `curl`, `python3`, `flock`, `docker` y el plugin compose.
-El usuario que ejecute el servicio debe poder acceder al clon por Git SSH (deploy key)
-y ejecutar `docker compose`. Ser miembro del grupo Docker equivale prácticamente
-al control del host: utiliza una cuenta administrativa dedicada.
-
-Sustituye `__DEPLOY_USER__` y `__APP_PATH__` en el archivo `.service`:
+Desde la Raspberry:
 
 ```bash
-sudo cp deploy/systemd/mesa-commander-update.service /etc/systemd/system/
-sudo cp deploy/systemd/mesa-commander-update.timer /etc/systemd/system/
-sudo nano /etc/systemd/system/mesa-commander-update.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now mesa-commander-update.timer
-systemctl list-timers mesa-commander-update.timer
+cd ~/docker/mesa-commander
+
+docker compose ps                         # Ver estado
+docker compose logs --tail=100 commander  # Ver registros
+curl http://127.0.0.1:3000/healthz       # Comprobar el motor
 ```
 
-Prueba el servicio con `sudo systemctl start mesa-commander-update.service`.
-Consulta logs con `journalctl -u mesa-commander-update.service -n 100`.
-El script solo actualiza si el commit remoto es distinto. Si hay una partida activa **o un jugador en voz**,
-**aplaza hasta la siguiente ejecución**. `Persistent=true` ejecuta una activación
-pendiente tras un apagado o suspensión del host.
+Para una instalación nueva, crea `.env` a partir de `.env.example`, establece `INVITE_PASSWORD` (mínimo 12 caracteres) y arranca `docker compose up -d --build commander`. **Nunca publiques `.env`**.
 
-El script presupone que `origin/main` es la rama de publicación (protegida y
-revisada). No es recomendable dejar que cualquier contribuidor despliegue código
-arbitrario a tu servidor: aprobar cambios mediante pull requests.
+Las actualizaciones se gestionan con `scripts/update-from-github.sh` y el temporizador `deploy/systemd/mesa-commander-update.timer` (07:00, hora de Madrid). Si el equipo estaba apagado, `Persistent=true` permite recuperar la comprobación al encenderlo. Si existe una partida o alguien está en voz, el despliegue se aplaza hasta una ejecución posterior; **no se aplica inmediatamente al terminar la partida**.
 
-## Limitaciones que aún deben probarse
+```bash
+systemctl list-timers --all mesa-commander-update.timer
+sudo journalctl -u mesa-commander-update.service -n 50 --no-pager
+```
 
-Este proyecto es una **integración inicial** construida sobre un archivo de unos
-14.000 renglones y múltiples mecanismos en el navegador, especialmente torneos,
-reconexión, eventos, prompts, guardados y mazos. Aunque el motor se ejecuta en el
-servidor, las partidas de 4 humanos, las reconexiones, permisos y restauración no
-han sido validadas extremo a extremo. No uses esta versión para partidas importantes
-sin hacer pruebas con navegadores y usuarios reales.
+La actualización utiliza una **clave SSH de despliegue de solo lectura** para consultar `origin/main`. La copia desplegada en la Raspberry no debe editarse directamente: los cambios se preparan en ramas de GitHub y se aprueban mediante Pull Requests.
 
-El servidor aplica los mensajes de entrada mediante la lógica del HTML original;
-la validación exhaustiva de permisos de cada acción y autenticación por jugador
-no están resueltas. Para exposición pública más allá de un pequeño grupo de
-amigos es necesario introducir autenticación (o invitaciones firmadas), limitar
-peticiones y reforzar el protocolo. El nombre y el PID del navegador **no son
-credenciales seguras** y permiten suplantación si alguien los conoce.
+### Limitaciones conocidas
 
-## Archivos
+- Las partidas y las reconexiones siguen en fase de pruebas; un reinicio inesperado puede perder las acciones posteriores al último punto de recuperación.
+- La voz utiliza WebRTC entre navegadores. Tailscale Funnel publica la web y los WebSockets, **pero no sustituye a un servidor TURN**; algunas conexiones entre casas necesitarán TURN accesible públicamente.
+- La autenticación y la validación de acciones todavía requieren mejoras antes de considerar segura una publicación pública permanente. La contraseña de invitación no sustituye a un sistema completo de cuentas y permisos.
 
-- `app/index.html`: HTML original adaptado para conectar el asiento 0.
-- `config/game.json`: parámetros compartidos (nombre de mesa, código y mínimo de jugadores).
-- `server/central.js`: puente de eventos, lobby y cuatro clientes.
-- `server/index.mjs`: servidor HTTP/WebSocket, señalización de voz y Chromium con perfil persistente.
-- `server/voice.js`: interfaz de voz y conexiones WebRTC de audio.
-- `Dockerfile` y `compose.yaml`: servidor de juego en Docker con TLS en Caddy y TURN opcional.
-- `scripts/update-from-github.sh`: pull condicionado y despliegue con Docker.
-- `deploy/systemd`: comprobación de cambios a las 07:00 (Madrid).
+---
 
-## Para colaboración
-
-Cada persona crea una rama y un pull request. El administrador aprueba cambios a
-`main`; el servidor solo despliega `main` a las 07:00. Mantened `.env` y secretos
-fuera del repositorio. Los parámetros generales pueden vivir en archivos
-versionados; preferencias y mazos privados deberían permanecer fuera de Git.
+**Proyecto hecho para disfrutar de Commander con amigos y mejorarlo entre todos.** 🧙
