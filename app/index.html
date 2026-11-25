@@ -1341,7 +1341,7 @@ function xParseEffects(s, ops) {
   // --- Phenax deck ---
   if (/^~ gains "/.test(s)) { rm(() => true); if (/^~ gains "\{t\}: add \{c\}/.test(s)) ops.push({ k: 'urzaGain', n: 1 }); else if (/^~ gains "\{2\}, \{t\}: create a 0\/0 colorless construct/.test(s)) ops.push({ k: 'urzaGain', n: 2 }); return; }
   if (/search your library for an artifact card with mana cost \{0\} or \{1\}, put it onto the battlefield/.test(s)) { rm(() => true); ops.push({ k: 'tutorArt01' }); return; }
-  if ((m = s.match(/search your library for an? ([a-z ]+?) card, reveal it, then shuffle and put that card on top/))) { rm(o => o.k === 'tutor'); ops.push({ k: 'tutor', f: m[1], top: true }); }
+  if ((m = s.match(/search your library for an? ([a-z ]+?) card, reveal it, then shuffle and put that card on top/))) { rm(o => o.k === 'tutor'); ops.push({ k: 'tutor', f: m[1], top: true, reveal: true }); }
   if (/untap all nonland permanents you control/.test(s)) ops.push({ k: 'untapAllNL' });
   if (/draw a card for each opponent who has more cards in (?:their|his or her) hand than you/.test(s)) { rm(o => o.k === 'draw'); ops.push({ k: 'draw', n: 0, nX: 'oppMoreHand' }); }
   if (/each player discards their hand, then draws cards equal to the greatest number of cards a player discarded this way/.test(s)) { rm(o => ['discard', 'selfDiscard', 'draw', 'eachDiscard'].includes(o.k)); ops.push({ k: 'windfall' }); }
@@ -2329,6 +2329,33 @@ function solve(s, cost, excl, poolOnly = false) {
   const left = units.filter((u, j) => !used[j] && u.c && tappedFor.has(u.c) && !u.improv && !u.ctr).map(u => ({ src: u.sac ? -1 : u.c.id, cols: u.cols, cre: !!u.cre }));
   return { s, pipCards, ctrUse, left, cards: [...new Set(sel.filter(u => u.c && !u.ctr).map(u => u.c))], sac: [...new Set(sel.filter(u => u.sac && u.c).map(u => u.c))], pool: sel.filter(u => u.pool != null).map(u => u.pool) };
 }
+// Offer alternate payments without tapping anything until the player confirms.
+function mcManaPlanKey(sol) {
+  return JSON.stringify({ cards: sol.cards.map(c => c.id).sort(), pool: [...sol.pool].sort(), counters: [...sol.ctrUse].map(([c,n]) => [c.id,n]).sort(), colored: [...sol.pipCards].map(c => c.id).sort() });
+}
+async function mcChooseMana(s, cost) {
+  const initial = solve(s, cost, null, !SET.autoTap);
+  if (!initial || !SET.autoTap) return initial;
+  const plans = [{ sol: initial, exclude: null }], seen = new Set([mcManaPlanKey(initial)]);
+  for (const land of initial.cards.filter(isLand)) {
+    const alt = solve(s, cost, land);
+    if (!alt) continue;
+    const key = mcManaPlanKey(alt);
+    if (!seen.has(key)) { seen.add(key); plans.push({ sol: alt, exclude: land }); }
+    if (plans.length >= 12) break;
+  }
+  if (plans.length === 1) return initial;
+  const labels = plans.map(({sol}, i) => {
+    const names = sol.cards.map(c => D(c).name).concat([...sol.ctrUse].map(([c,n]) => D(c).name + ' (' + n + ' cont.)'));
+    if (sol.pool.length) names.push(sol.pool.length + ' maná flotante');
+    return (i === 0 ? 'Automático: ' : 'Alternativa: ') + names.join(' + ');
+  });
+  const choice = __R(ME, G, await askChoice('Elige las fuentes de maná', [...labels, 'Cancelar lanzamiento']));
+  if (!Number.isInteger(choice) || !plans[choice]) return null;
+  const selected = plans[choice];
+  const refreshed = solve(s, cost, selected.exclude);
+  return refreshed && mcManaPlanKey(refreshed) === mcManaPlanKey(selected.sol) ? refreshed : null;
+}
 function pay(s, sol) {
   if (!sol) return;
   blbSpend(s, (sol.cards || []).reduce((a, c) => a + Math.max(1, manaAmt(c) || 1), 0) + (sol.pool || []).length);
@@ -2810,7 +2837,7 @@ function commonType(s) { const cnt = {}; for (const c of Object.values(G.cards))
 function typeChoices(s) { const cnt = {}; for (const c of Object.values(G.cards)) { if (!c || c.owner !== s || c.token) continue; for (const t of creTypes(D(c))) cnt[t] = (cnt[t] || 0) + 1; } for (const c of permsAll()) for (const t of creTypes(D(c))) cnt[t] = (cnt[t] || 0) + 0.5; return Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a]).slice(0, 10); }
 async function askChoice(title, labels) { __R(ME, G, await modalFree()); return modalPromise('actpick', `<header><h2>${esc(title)}</h2></header><div class="mb"><div class="blk">${labels.map((l, i) => `<button class="btn" style="text-align:left;white-space:normal" data-actpick="${i}">${esc(l)}</button>`).join('')}</div></div>`, true); }
 function shareType(a, b) { const ta = creTypes(D(a)), tb = creTypes(D(b)); return ta.some(t => tb.includes(t)) || (abOf(D(a)).changeling && tb.length) || (abOf(D(b)).changeling && ta.length); }
-function tokenCopyOf(s, src, pt) { const d = D(src); return makeToken(s, { name: d.name, p: pt ? pt[0] : (d.power != null ? basePT(d.power) : null), t: pt ? pt[1] : (d.toughness != null ? basePT(d.toughness) : null), kws: [...AB(src).kw], colors: d.colors, type: 'Token ' + d.type_line, text: d.oracle_text }); }
+function tokenCopyOf(s, src, pt) { const d = D(src); return makeToken(s, { name: d.name, p: pt ? pt[0] : (d.power != null ? basePT(d.power) : null), t: pt ? pt[1] : (d.toughness != null ? basePT(d.toughness) : null), kws: [...AB(src).kw], colors: d.colors, type: 'Token ' + d.type_line, text: d.oracle_text, img: d.img, imgL: d.imgL }); }
 function slimed(c) { return !!(c.cnt && c.cnt.slime > 0 && c.zone === 'bf' && !/\bhorror\b/i.test(D(c).type_line || '') && G.bf.some(id => { const y = G.cards[id]; return y && abOf(D(y)).sludge; })); }
 function escapeExile(s, c) { const n = abOf(D(c)).escape.n; const pool = G.p[s].gy.map(id => G.cards[id]).filter(x => x && x !== c).sort((a, b) => (isType(a, 'land') ? 0 : 1) - (isType(b, 'land') ? 0 : 1) || (value(a) - value(b))); const ex = pool.slice(0, n); ex.forEach(x => moveCard(x, 'exile')); log(`${pn(s)} exilia ${ex.length} cartas de su cementerio para el escape de ${cn(c)}.`); }
 function escapeOk(s, c) { const e = abOf(D(c)).escape; return !!e && c.zone === 'gy' && G.p[s].gy.length - 1 >= e.n; }
@@ -2841,7 +2868,7 @@ function fowOk(o, x) { return !!abOf(D(x)).fowAlt && G.p[o].life > 1 && G.p[o].h
 function fowPay(o, x, b) { b = b || bestBy(G.p[o].hand.map(id => G.cards[id]).filter(y => y !== x && (D(y).colors || []).includes('U')), y => -value(y) - (D(y).cmc || 0)); if (!b) return false; moveCard(b, 'exile'); loseLife(o, 1); log(`${pn(o)} paga 1 vida y exilia ${cn(b)} para lanzar ${cn(x)} sin pagar su coste.`); return true; }
 function payCardOrAlt(o, x) { const sol = solve(o, fullCost(x, o)); if (sol) { pay(o, sol); return true; } if (fowOk(o, x)) return fowPay(o, x); return false; }
 async function userPayCardOrAlt(o, x) {
-  const sol = solve(o, fullCost(x, o), null, !SET.autoTap); if (sol) { pay(o, sol); return true; }
+  if (solve(o, fullCost(x, o), null, !SET.autoTap)) { const sol = __R(ME, G, await mcChooseMana(o, fullCost(x, o))); if (!sol) return false; pay(o, sol); return true; }
   if (fowOk(o, x)) { const blues = G.p[o].hand.map(id => G.cards[id]).filter(y => y !== x && (D(y).colors || []).includes('U')); const b = blues.length === 1 ? blues[0] : __R(ME, G, await pickFromList(blues, `${D(x).name}: elige la carta azul que exilias (pagas 1 vida)`)); if (b) { return fowPay(o, x, b); } }
   toast('No tienes maná suficiente para responder con esta carta.', true); return false;
 }
@@ -3841,7 +3868,7 @@ function applyOp(op, ctx, t) {
     }
     case 'treasure': { const to = op.forTgt ? (ctx.lastTC ?? s) : s; for (let i = 0; i < op.n; i++) makeToken(to, TREASURE); log(`${pn(to)} crea ${op.n} Tesoro${op.n > 1 ? 's' : ''}${by}.`); break; }
     case 'ramp': doRamp(s, op, by); break;
-    case 'tutor': { const top = !!op.top; if (isBotSeat(s)) { const c = op.f ? bestBy(G.p[s].lib.map(x => G.cards[x]).filter(x => typeMatchDef(D(x), op.f, x)), x => (D(x).cmc || 0) + Math.random()) : bestTutor(s); if (c) { if (agentSteal(s, c)) { shuffle(G.p[s].lib); break; } if (top) { shuffle(G.p[s].lib); moveCard(c, 'lib', { pos: 'top' }); log(`${pn(s)} busca una carta y la pone encima de su biblioteca${by}.`); } else { moveCard(c, 'hand'); shuffle(G.p[s].lib); log(`${pn(s)} busca una carta en su biblioteca${by}.`); } } } else openLibrarySearch(s, top ? 'Busca una carta y ponla encima de tu biblioteca' : 'Busca una carta y ponla en tu mano', { f: op.f, top }); break; }
+    case 'tutor': { const top = !!op.top; if (isBotSeat(s)) { const c = op.f ? bestBy(G.p[s].lib.map(x => G.cards[x]).filter(x => typeMatchDef(D(x), op.f, x)), x => (D(x).cmc || 0) + Math.random()) : bestTutor(s); if (c) { if (agentSteal(s, c)) { shuffle(G.p[s].lib); break; } if (op.reveal) mcRevealTutor(s, c); if (top) { shuffle(G.p[s].lib); moveCard(c, 'lib', { pos: 'top' }); log(`${pn(s)} busca una carta y la pone encima de su biblioteca${by}.`); } else { moveCard(c, 'hand'); shuffle(G.p[s].lib); log(`${pn(s)} busca una carta en su biblioteca${by}.`); } } } else openLibrarySearch(s, top ? 'Busca una carta y ponla encima de tu biblioteca' : 'Busca una carta y ponla en tu mano', { f: op.f, top, reveal: !!op.reveal, restricted: true }); break; }
     case 'pumpAll': for (const c of permsOf(s).filter(isCreature)) { if (op.stat && (op.stat === 'power' ? P(c) : T(c)) < op.min) continue; c.tp += op.p; c.tt += op.p === op.t ? op.t : op.t; if (op.kw) c.tkw.push(op.kw); } log(`Las criaturas de ${pn(s)} obtienen +${op.p}/+${op.t}${op.kw ? ' y ' + (KW_ES[op.kw] || op.kw) : ''}${by}.`); break;
     case 'selfCounters': { const c0 = src && (G.cards[src.id] || src); const n0 = op.nAmt ? (ctx.amount || 0) : op.n; if (c0 && c0.zone === 'bf' && n0 > 0) { const k = addCounters(c0, n0, 'p1', true); log(`${cn(c0)} recibe ${k} contador${k > 1 ? 'es' : ''} +1/+1.`); } break; }
     case 'reanimate': if (t && t.zone === 'gy') { const mv0 = D(t).cmc || 0; const own = t.owner; moveCard(t, 'bf', { ctl: s, tapped: !!op.tapped }); if (op.setBase && t.zone === 'bf') { t.setBase = op.setBase; if (op.addType) (t.addTypes ||= []).push(op.addType); } if (op.haste && t.zone === 'bf') t.tkw.push('haste'); log(`${pn(s)} devuelve ${cn(t)} ${own !== s ? `del cementerio de ${pn(own)} ` : ''}al campo${by}.`); if (op.loseCmc && mv0) { loseLife(s, mv0); log(`${pn(s)} pierde ${mv0} vidas.`); } } break;
@@ -4005,13 +4032,41 @@ function applyOp(op, ctx, t) {
   }
 }
 const TREASURE = { name: 'Treasure', p: null, t: null, type: 'Token Artifact — Treasure', text: '{T}, Sacrifice this artifact: Add one mana of any color.', colors: [] };
+// Resolve token illustrations from Scryfall without changing their game definitions.
+// Serialize requests to avoid bursting the API; leave the text frame if no match exists.
+const mcTokenArt = new Map();
+let mcTokenArtQueue = Promise.resolve();
+function mcLoadTokenArt(d) {
+  if (!d || d.img || !d.name) return;
+  const norm = v => String(v || '').trim().toLowerCase().replace(/[.\s]+/g, ' ').trim();
+  const colors = v => [...(v || [])].sort().join('');
+  const key = JSON.stringify([d.name, d.type_line, d.power, d.toughness, colors(d.colors), norm(d.oracle_text)]);
+  if (!mcTokenArt.has(key)) {
+    const task = mcTokenArtQueue.then(async () => {
+      try {
+        const q = 't:token !"' + d.name.replace(/["\\]/g, '') + '"';
+        const r = await fetch('https://api.scryfall.com/cards/search?include_extras=true&unique=cards&q=' + encodeURIComponent(q), { headers: { Accept: 'application/json' } });
+        if (!r.ok) return null;
+        const j = await r.json();
+        const matches = (j.data || []).map(c => ({ card: c, face: c.card_faces ? c.card_faces.find(f => norm(f.name) === norm(d.name)) : c })).filter(({card,face}) => face && norm(face.name) === norm(d.name) && norm(face.type_line) === norm(d.type_line) && String(face.power ?? '') === String(d.power ?? '') && String(face.toughness ?? '') === String(d.toughness ?? '') && colors(face.colors || card.colors) === colors(d.colors) && norm(face.oracle_text) === norm(d.oracle_text));
+        const hit = matches.find(({card,face}) => (face.image_uris || card.image_uris)?.normal);
+        const img = hit && (hit.face.image_uris || hit.card.image_uris);
+        return img ? { img: img.small || img.normal, imgL: img.normal } : null;
+      } catch (_) { return null; }
+    });
+    mcTokenArt.set(key, task);
+    mcTokenArtQueue = task.then(() => new Promise(res => setTimeout(res, 125)));
+  }
+  mcTokenArt.get(key).then(art => { if (art && !d.img) { Object.assign(d, art); render(); } });
+}
 function tokenDefKey(t) {
   const key = 'tok:' + t.name + ':' + (t.p ?? '') + '/' + (t.t ?? '') + ':' + (t.kws || []).join(',') + ':' + (t.colors || []).join('') + (t.type ? ':' + t.type : '') + (t.uniq ? ':' + t.uniq : '');
   if (!G.defs[key]) G.defs[key] = {
     name: t.name, mana_cost: '', cmc: 0, type_line: t.type || ('Token Creature — ' + t.name),
     oracle_text: t.text || (t.kws || []).map(cap).join(', '), power: t.p == null ? undefined : String(t.p), toughness: t.t == null ? undefined : String(t.t),
-    colors: t.colors || [], ci: t.colors || [], kw: t.kws || [], token: true, img: null
+    colors: t.colors || [], ci: t.colors || [], kw: t.kws || [], token: true, img: t.img || null, imgL: t.imgL || null
   };
+  mcLoadTokenArt(G.defs[key]);
   return key;
 }
 const TOKEN_CAP = 150;
@@ -4131,12 +4186,16 @@ function blocksHTML(attacks, blocks) {
 }
 function closeReveal() { const r = UI.reveal; if (!r) return; UI.reveal = null; UI.revMin = false; $('#reveal').hidden = true; renderPeek(); r.res(); if (!UI.reveal && UI.revQueue && UI.revQueue.length) { UI.reveal = UI.revQueue.shift(); renderReveal(); } }
 // a card a person plays is shown in large to the other people at the table (online), without making anyone wait
-function showPlay(s, mk) {
+function showPlay(s, mk, force = false) {
   if (!G || G.over) return;
   for (const h of humanSeats()) {
-    if (h === s || !alive(h) || !pref(h, 'stepMode') || !NET.canAsk(h)) continue;
+    if (h === s || !alive(h) || (!force && !pref(h, 'stepMode')) || !NET.canAsk(h)) continue;
     asSeat(h, () => { const o = Object.assign(mk(), { res: () => { }, played: true }); if (UI.reveal) { (UI.revQueue ||= []).push(o); if (UI.revQueue.length > 6) UI.revQueue.shift(); return; } UI.reveal = o; renderReveal(); });
   }
+}
+function mcRevealTutor(s, c) {
+  log(`${pn(s)} revela ${cn(c)} al buscar en su biblioteca.`);
+  showPlay(s, () => ({ sub: esc(G.p[s].name), cards: [c], title: `${pn(s)} revela una carta` }), true);
 }
 function dropReveal() { UI.reveal = null; $('#reveal').hidden = true; }
 function renderReveal() {
@@ -5584,7 +5643,7 @@ async function resolvePromptInner(id) {
     if (!G || G.over) return;
     if (XPROMPT[op.k] && !needsTarget(op)) { __R(ME, G, await XPROMPT[op.k](op, pr)); sba(); render(); continue; }
     if (op.k === 'mode') { const ms = __R(ME, G, await pickModes(op.md, pr.title)); if (ms && op.md.spree) { const cost = ms.reduce((a, m) => ({ generic: a.generic + (m.cost ? m.cost.generic : 0), pips: [...a.pips, ...(m.cost ? m.cost.pips : [])] }), { generic: 0, pips: [] }); if (SET.autoTap && (cost.generic || cost.pips.length)) { const sol = solve(pr.ctx.seat, cost); if (sol) pay(pr.ctx.seat, sol); } } if (ms && ms.length) { log(`Eliges: ${ms.map(m => esc(m.text)).join(' / ')}`); queue.unshift(...ms.flatMap(m => m.ops)); } continue; }
-    if (op.k === 'tutor') { __R(ME, G, await openLibrarySearch(pr.ctx.seat, op.top ? `Busca ${op.f ? 'un ' + esES(op.f) : 'una carta'} y ponla encima de tu biblioteca` : 'Busca una carta y ponla en tu mano', { f: op.f, top: !!op.top })); continue; }
+    if (op.k === 'tutor') { __R(ME, G, await openLibrarySearch(pr.ctx.seat, op.top ? `Busca ${op.f ? 'un ' + esES(op.f) : 'una carta'} y ponla encima de tu biblioteca` : 'Busca una carta y ponla en tu mano', { f: op.f, top: !!op.top, reveal: !!op.reveal, restricted: true })); continue; }
     if (op.k === 'putBack') {
       for (let i = 0; i < op.n; i++) {
         const hand = G.p[pr.ctx.seat].hand.map(id => G.cards[id]);
@@ -6296,8 +6355,11 @@ async function userPlay(c) {
   }
   if (!altPaid) {
     let cst = fullCost(c, ME); if (c.anyManaCast) { cst = Object.assign({}, cst, { generic: cst.generic + cst.pips.length, pips: [] }); c.anyManaCast = false; }
-    const sol = solve(ME, cst, null, !SET.autoTap);
-    if (!sol) { toast('No tienes maná suficiente para lanzar esta carta.', true); render(); return; }
+    if (!solve(ME, cst, null, !SET.autoTap)) { toast('No tienes maná suficiente para lanzar esta carta.', true); render(); return; }
+    UI.busy = true;
+    let sol;
+    try { sol = __R(ME, G, await mcChooseMana(ME, cst)); } finally { UI.busy = false; }
+    if (!sol) { render(); return; }
     pay(ME, sol);
   }
   UI.busy = true;
@@ -6532,18 +6594,18 @@ function openZoneViewer(s, zone) {
 }
 async function openLibrarySearch(s, title, opts = {}) {
   __R(ME, G, await modalFree());
-  const p = G.p[s]; UI.libTop = null;
+  const p = G.p[s]; UI.libTop = null; UI.mcLibSearch = { ...opts, seat: s };
   const render2 = (q) => {
     const cards = p.lib.map(id => G.cards[id]).filter(c => (!q || keyName(D(c).name).includes(keyName(q))) && (!opts.f || typeMatchDef(D(c), opts.f, c))).sort((a, b) => D(a).name.localeCompare(D(b).name));
     const seen = new Set(); const uniq = cards.filter(c => { if (seen.has(c.n)) return false; seen.add(c.n); return true; });
-    $('#libres').innerHTML = cardGridHTML(uniq, c => opts.top ? `<button class="btn sm" data-lib="${c.id}:top">Arriba</button>` : `<button class="btn sm" data-lib="${c.id}:hand">Mano</button><button class="btn sm" data-lib="${c.id}:bf">Campo</button>`);
+    $('#libres').innerHTML = cardGridHTML(uniq, c => opts.top ? `<button class="btn sm" data-lib="${c.id}:top">Arriba</button>` : `<button class="btn sm" data-lib="${c.id}:hand">Mano</button>${opts.restricted ? '' : `<button class="btn sm" data-lib="${c.id}:bf">Campo</button>`}`);
   };
   const pr = modalPromise('lib', `<header><h2>${esc(title)}</h2><button class="btn" data-act="mclose">Cerrar</button></header>
     <div class="mb"><input type="text" id="libq" placeholder="Filtrar por nombre…" autocomplete="off"><div id="libres"></div></div>`);
   render2('');
   $('#libq').addEventListener('input', e => render2(e.target.value));
   setTimeout(__B(() => $('#libq') && $('#libq').focus()), 30);
-  return pr.then(__B(() => { shuffle(p.lib); if (UI.libTop != null) { const t = G.cards[UI.libTop]; UI.libTop = null; if (t && t.zone === 'lib') { moveCard(t, 'lib', { pos: 'top' }); log(`Pones ${cn(t)} encima de tu biblioteca.`); } } render(); }));
+  return pr.then(__B(() => { UI.mcLibSearch = null; shuffle(p.lib); if (UI.libTop != null) { const t = G.cards[UI.libTop]; UI.libTop = null; if (t && t.zone === 'lib') { moveCard(t, 'lib', { pos: 'top' }); log('Pones una carta encima de tu biblioteca.'); } } render(); }));
 }
 function openTopN(n) {
   const p = G.p[ME];
@@ -7209,7 +7271,18 @@ document.addEventListener('click', async e => {
   if (act) { __R(ME, G, await doAct(act.dataset.act, act, e)); return; }
   if (t.closest('#reveal')) return;
   // modal specific
-  const lib = t.closest('[data-lib]'); if (lib) { pushUndo(); const [id, to] = lib.dataset.lib.split(':'); const c = G.cards[id]; if (c && agentSteal(c.owner, c)) { closeModal(); render(); return; } if (c && to === 'top') { UI.libTop = c.id; closeModal(); render(); return; } if (c) { if (to === 'bf') moveCard(c, 'bf', { ctl: c.owner }); else moveCard(c, 'hand'); log(`Buscas ${cn(c)} y lo pones ${to === 'bf' ? 'en el campo' : 'en tu mano'}.`); sba(); } closeModal(); render(); return; }
+  const lib = t.closest('[data-lib]'); if (lib) {
+    const [id, to] = lib.dataset.lib.split(':'); const c = G.cards[id]; const search = UI.mcLibSearch;
+    if (!search || !c || c.zone !== 'lib' || c.owner !== search.seat || (search.f && !typeMatchDef(D(c), search.f, c))) return;
+    if (search.top ? to !== 'top' : (to !== 'hand' && (search.restricted || to !== 'bf'))) return;
+    pushUndo();
+    if (agentSteal(c.owner, c)) { closeModal(); render(); return; }
+    if (search.reveal) mcRevealTutor(search.seat, c);
+    if (to === 'top') { UI.libTop = c.id; closeModal(); render(); return; }
+    if (to === 'bf') { moveCard(c, 'bf', { ctl: c.owner }); log(`Buscas ${cn(c)} y lo pones en el campo.`); }
+    else { moveCard(c, 'hand'); log('Buscas una carta y la pones en tu mano.'); }
+    sba(); closeModal(); render(); return;
+  }
   const top = t.closest('[data-top]'); if (top) { pushUndo(); const [id, to] = top.dataset.top.split(':'); const c = G.cards[id]; if (c) { if (to === 'bottom') moveCard(c, 'lib', { pos: 'bottom' }); else moveCard(c, to); } UI.topDraw && UI.topDraw(); render(); return; }
   const sc = t.closest('[data-scry]'); if (sc && UI.scry) { const [id, d] = sc.dataset.scry.split(':'); UI.scry.dest[id] = d; renderScry(); return; }
   const md = t.closest('[data-mode]'); if (md) { closeModal([+md.dataset.mode]); return; }
@@ -8419,7 +8492,7 @@ function eoeWhole(s) {
   if (/^counter target artifact or enchantment spell$/.test(s)) return [{ k: 'counter', f: 'artifact or enchantment', unless: 0 }];
   if (/^target artifact or creature gains indestructible until end of turn$/.test(s)) return [{ k: 'pumpT', p: 0, t: 0, kws: ['indestructible'], f: 'artifact or creature you control' }];
   if ((m = s.match(/^~ deals (\d+) damage to target tapped creature$/))) return [{ k: 'dmg', n: +m[1], f: 'tapped creature' }];
-  if (/^search your library for an artifact card, reveal it, put it into your hand, then shuffle$/.test(s)) return [{ k: 'tutorArt' }];
+  if (/^search your library for an artifact card, reveal it, put it into your hand, then shuffle$/.test(s)) return [{ k: 'tutor', f: 'artifact', reveal: true }];
   if (/^each player creates a lander token$/.test(s)) return [{ k: 'lander', each: true }];
   if (/^tap enchanted permanent$/.test(s)) return [{ k: 'tapAura' }];
   if (/^put its counters on target creature you control$/.test(s)) return [{ k: 'moveCtrs' }];
@@ -8590,7 +8663,7 @@ function hobWhole(s) {
   if (/^put a hone counter on each equipment you control$/.test(s)) return [{ k: 'honeAll' }];
   if (/^(?:it|~) gets \+1\/\+1 until end of turn for each other creature you control$/.test(s)) return [{ k: 'selfPumpOthers' }];
   if (/^tap enchanted creature and remove all counters from it$/.test(s)) return [{ k: 'tapAura' }];
-  if ((m = s.match(/^search your library for an? ([a-z ]+?) card, reveal it, put it into your hand, then shuffle$/))) return [{ k: 'tutor', f: m[1] }];
+  if ((m = s.match(/^search your library for an? ([a-z ]+?) card, reveal it, put it into your hand, then shuffle$/))) return [{ k: 'tutor', f: m[1], reveal: true }];
   if ((m = s.match(/^attach (?:it|~) to target ([a-z]+) you control$/))) return [{ k: 'attach', f: m[1] + ' you control' }];
   return null;
 }
@@ -8917,12 +8990,12 @@ function fxWhole(s) {
   if ((m = s.match(/^target ([a-z]+) creature gets \+(\d+)\/\+(\d+) until end of turn$/))) return [{ k: 'pumpT', p: +m[2], t: +m[3], f: 'creature you control' }];
   if ((m = s.match(/^attacking creatures get \+(\d+)\/\+(\d+) until end of turn$/))) return [{ k: 'fxPumpAtk', p: +m[1], t: +m[2] }];
   if (/^untap target land$/.test(s)) return [{ k: 'fxUntapLand' }];
-  if (/^search your library for an artifact card, reveal it, put it into your hand, then shuffle\. activate only if you control three or more artifacts$/.test(s)) return [{ k: 'tutorArt' }];
+  if (/^search your library for an artifact card, reveal it, put it into your hand, then shuffle\. activate only if you control three or more artifacts$/.test(s)) return [{ k: 'tutor', f: 'artifact', reveal: true }];
   if ((m = s.match(/^(?:until end of turn, )?~ becomes an? (\d+)\/(\d+) ([a-z ]+?) creature(?: with all creature types)?(?: with "[^"]*")?(?: until end of turn)?\.? it's still a land$/))) { const w = m[3].split(' ').filter(x => x && !COLORWORD[x] && x !== 'and'); return [{ k: 'selfAnimate', p: +m[1], t: +m[2], types: ['Creature', ...w.map(cap)], art: false, kws: [] }]; }
   if (/^~ becomes a 2\/2 creature with all creature types until end of turn\. it's still a land$/.test(s)) return [{ k: 'selfAnimate', p: 2, t: 2, types: ['Creature'], art: false, kws: [] }];
   if (/^create a token that's a copy of target creature you control$/.test(s)) return [{ k: 'fxCopyT', f: 'creature you control', n: 1 }];
   if (/^target legendary creature gains hexproof and indestructible until end of turn$/.test(s)) return [{ k: 'pumpT', p: 0, t: 0, kws: ['hexproof', 'indestructible'], f: 'legendary creature' }];
-  if ((m = s.match(/^search your library for an? ([a-z]+) card, reveal (?:it|that card), put it into your hand, then shuffle$/))) return [{ k: 'tutor', f: m[1] }];
+  if ((m = s.match(/^search your library for an? ([a-z]+) card, reveal (?:it|that card), put it into your hand, then shuffle$/))) return [{ k: 'tutor', f: m[1], reveal: true }];
   if ((m = s.match(/^gain control of target ([a-z]+)\. \(this effect lasts indefinitely\.\)$|^gain control of target ([a-z]+)$/)) && !['creature', 'permanent', 'artifact'].includes(m[1] || m[2])) return [{ k: 'stealT', f: 'permanent', perm: true, forever: true }];
   if (/^return another target creature you control to its owner's hand$/.test(s)) return [{ k: 'bounceOwn' }];
   if (/^put a coin counter on ~\. when you do, you may cast target instant or sorcery card with mana value equal to the number of coin counters on ~ from your graveyard without paying its mana cost\. if that spell would be put into your graveyard, exile it instead$/.test(s)) return [{ k: 'fxWishing' }];
