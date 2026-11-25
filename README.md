@@ -16,6 +16,38 @@ Actualmente lo alojamos en una **Raspberry Pi 5 con Docker**. Se accede mediante
 
 > **Estado del proyecto:** la interfaz y el motor funcionan, pero todavía faltan pruebas completas con varios jugadores reales, recuperación ante fallos y endurecimiento de la seguridad. El chat de voz puede necesitar un servidor TURN para algunas redes.
 
+## 🆕 Últimas novedades — 26 de noviembre de 2026
+
+Las correcciones de la [PR #1](https://github.com/piconcd/mesa-commander/pull/1) ya están incorporadas a `main` y se distribuirán mediante el actualizador habitual de la Raspberry Pi.
+
+| Área | Cambios |
+| --- | --- |
+| Voz | Controles locales del panel y limpieza de conexiones al salir o reconectar. |
+| Teclado | Gestión local de la entrada y de la cesión de prioridad mediante la barra espaciadora. |
+| Maná y costes | Validación del pago de hechizos, selección de fuentes alternativas y mejoras en el impuesto de comandante y la afinidad por Aliados. |
+| Tierras | Elección de pagar 2 vidas o entrar giradas para las shocklands jugadas normalmente. |
+| Tutores | Revelación de las cartas buscadas cuando corresponda en los tutores compatibles. |
+| Fichas | Mejoras en la carga de imágenes de tokens. |
+| Sagas | Correcciones en las solicitudes de decisión y en la gestión de capítulos, que avanzan al comienzo de la primera fase principal según las reglas generales. |
+| Calidad | Pruebas de regresión automáticas y validación independiente del proxy de XMage Nexus mediante GitHub Actions. |
+
+### Motor de reglas: migración a XMage
+
+La partida **continúa utilizando el motor JavaScript original** ejecutado en Chromium. XMage Nexus es el candidato para sustituirlo y su proxy ya cuenta con una comprobación independiente en CI, pero todavía no existe una integración operativa con Mesa Commander.
+
+El objetivo es delegar en XMage las reglas, prioridades, pila, combate, costes, habilidades y decisiones legales de Commander, manteniendo la interfaz web y el chat de voz.
+
+Quedan pendientes la integración del adaptador, el soporte efectivo de las mecánicas de Avatar (incluido bending), interacciones complejas como Teferi's Protection, y la validación integral de partidas de cuatro jugadores y compatibilidad ARM64.
+
+Más información: [estado de la migración](docs/migration-status.md) y [plan técnico](docs/rules-engine-migration.md).
+
+### Pruebas y seguimiento
+
+Las correcciones se probarán durante las partidas reales en la instalación habitual; no es necesario montar otro servidor. Las pruebas automáticas de GitHub Actions complementan este proceso, pero no certifican una partida completa ni todas las interacciones de Magic.
+
+- [Estado de las comprobaciones en GitHub Actions](https://github.com/piconcd/mesa-commander/actions).
+- Para comunicar un fallo, indica la carta, el turno o fase, los pasos realizados y el resultado esperado. Si es posible, añade una captura sin información privada.
+
 ## 🎮 Cómo jugar
 
 1. Pide al administrador la **dirección HTTPS** de Mesa Commander y la **contraseña de invitación**.
@@ -27,11 +59,11 @@ No necesitas instalar Docker, Tailscale ni el juego en tu ordenador para jugar. 
 
 ## 🤝 ¿Quieres colaborar?
 
-¡Las propuestas de cambios, informes de errores y mejoras son bienvenidas! El código está en este repositorio privado: **[piconcd/mesa-commander](https://github.com/piconcd/mesa-commander)**.
+¡Las propuestas de cambios, informes de errores y mejoras son bienvenidas! El código está en este repositorio público: **[piconcd/mesa-commander](https://github.com/piconcd/mesa-commander)**.
 
-### 1. Consigue acceso al repositorio
+### 1. Accede al repositorio
 
-Pide a la persona administradora que te invite como colaborador en GitHub y acepta la invitación. Necesitarás una cuenta de GitHub; **no necesitas acceso SSH a la Raspberry**.
+Puedes consultar el código públicamente. Para colaborar con permisos de escritura, pide a la persona administradora que te invite en GitHub. También puedes proponer cambios desde un fork. **No necesitas acceso SSH a la Raspberry**.
 
 ### 2. Elige qué mejorar
 
@@ -42,6 +74,8 @@ Pide a la persona administradora que te invite como colaborador en GitHub y acep
 | Comunicación y servidor centralizado | `server/` |
 | Instrucciones del proyecto | `README.md` |
 | Contenedores y despliegue | `compose.yaml`, `Dockerfile`, `deploy/`, `scripts/` |
+| Migración a XMage | `docs/` |
+| Pruebas automáticas | `tests/`, `.github/workflows/` |
 
 ### 3. Propón tu cambio (sin usar la terminal)
 
