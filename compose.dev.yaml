@@ -1,0 +1,24 @@
+# Entorno de desarrollo. No usar junto con compose.yaml como override.
+# Arrancar desde una copia de trabajo separada con -p mesa-commander-dev.
+services:
+  commander:
+    build: .
+    init: true
+    environment:
+      INVITE_PASSWORD: ${INVITE_PASSWORD:?Configura una contraseña de pruebas en .env}
+      STUN_URLS: ${STUN_URLS:-stun:stun.l.google.com:19302}
+      TURN_URLS: ""
+      TURN_SHARED_SECRET: ""
+    shm_size: 1gb
+    ports:
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - dev_data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+volumes:
+  dev_data:
