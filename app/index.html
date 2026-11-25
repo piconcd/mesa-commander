@@ -2146,7 +2146,7 @@ function trigMult(src) {
 function etbTapUnless(c) {
   const u = AB(c).tapUnless; if (!u) return false;
   const s = c.ctl; const lands = permsOf(s).filter(x => isLand(x) && x.id !== c.id);
-  if (u.payLife) { const pays = G.p[s].life > (isBotSeat(s) ? 15 : 10); if (pays) { loseLife(s, u.payLife); log(`${pn(s)} paga ${u.payLife} vidas para que ${cn(c)} entre enderezada.`); } return !pays; }
+  if (u.payLife) { const decision = c.mcEntryLife; const pays = G.p[s].life >= u.payLife && G.p[s].lifeLock !== G.turnsTaken && (typeof decision === 'boolean' ? decision : isBotSeat(s) && G.p[s].life > 15); if (pays) { loseLife(s, u.payLife); log(`${pn(s)} paga ${u.payLife} vidas por ${cn(c)}.`); } return !pays; }
   if (u.reveal) { const ok = G.p[s].hand.some(id => { const tl = (D(G.cards[id]).type_line || '').toLowerCase(); return u.reveal.some(t => tl.includes(t)); }); if (ok) log(`${pn(s)} revela una carta para que ${cn(c)} entre enderezada.`); return !ok; }
   if (u.ctl) return !lands.some(x => u.ctl.some(t => isType(x, t)));
   if (u.basics2) return lands.filter(x => /\bbasic\b/i.test(D(x).type_line || '')).length < 2;
@@ -2265,6 +2265,7 @@ function fullCost(c, s) {
   if (c.xVal && pc.x) cost.generic += c.xVal * pc.x;
   const kk = abOf(D(c)).kicker; if (kk && c.kicked) { cost.generic += kk.generic; cost.pips.push(...kk.pips.map(p => p.slice())); }
   if (abOf(D(c)).affinityArt) cost.generic = Math.max(0, cost.generic - permsOf(s).filter(x => isType(x, 'artifact')).length);
+  if (/^affinity for allies\b/im.test(D(c).oracle_text || '')) cost.generic = Math.max(0, cost.generic - permsOf(s).filter(x => isType(x, 'ally')).length);
   for (const x of permsOf(s)) if (AB(x).cloudKey && x.chosenCardType && new RegExp('\\b' + x.chosenCardType + '\\b').test(tl0)) cost.generic = Math.max(0, cost.generic - 1);
   if (abOf(D(c)).improvise) cost.improvise = true;
   { const os = abOf(D(c)).offspring; if (os && c.offspringPaid && !isBotSeat(s)) { cost.generic += os.generic; cost.pips.push(...os.pips.map(p => p.slice())); } }
@@ -2296,8 +2297,8 @@ function manaUnits(s, excl, cost) {
   units.sort((a, b) => ((a.pool != null ? 0 : 1) - (b.pool != null ? 0 : 1)) || (a.sac - b.sac) || ((a.hurt || 0) - (b.hurt || 0)) || (a.cols.length - b.cols.length));
   return units;
 }
-function solve(s, cost, excl) {
-  const units = manaUnits(s, excl, cost);
+function solve(s, cost, excl, poolOnly = false) {
+  const units = manaUnits(s, excl, cost).filter(u => !poolOnly || u.pool != null);
   const fits = (u, p) => !u.improv && p.some(col => u.cols.includes(col));
   const pips = cost.pips.slice().sort((a, b) => units.filter(u => fits(u, a)).length - units.filter(u => fits(u, b)).length);
   const used = new Array(units.length).fill(false);
@@ -2840,9 +2841,9 @@ function fowOk(o, x) { return !!abOf(D(x)).fowAlt && G.p[o].life > 1 && G.p[o].h
 function fowPay(o, x, b) { b = b || bestBy(G.p[o].hand.map(id => G.cards[id]).filter(y => y !== x && (D(y).colors || []).includes('U')), y => -value(y) - (D(y).cmc || 0)); if (!b) return false; moveCard(b, 'exile'); loseLife(o, 1); log(`${pn(o)} paga 1 vida y exilia ${cn(b)} para lanzar ${cn(x)} sin pagar su coste.`); return true; }
 function payCardOrAlt(o, x) { const sol = solve(o, fullCost(x, o)); if (sol) { pay(o, sol); return true; } if (fowOk(o, x)) return fowPay(o, x); return false; }
 async function userPayCardOrAlt(o, x) {
-  const sol = solve(o, fullCost(x, o)); if (sol) { pay(o, sol); return; }
-  if (fowOk(o, x)) { const blues = G.p[o].hand.map(id => G.cards[id]).filter(y => y !== x && (D(y).colors || []).includes('U')); const b = blues.length === 1 ? blues[0] : __R(ME, G, await pickFromList(blues, `${D(x).name}: elige la carta azul que exilias (pagas 1 vida)`)); if (b) { fowPay(o, x, b); return; } }
-  log(`<span style="color:var(--brass2)">No tienes maná suficiente para ${cn(x)}; se lanza igualmente.</span>`);
+  const sol = solve(o, fullCost(x, o), null, !SET.autoTap); if (sol) { pay(o, sol); return true; }
+  if (fowOk(o, x)) { const blues = G.p[o].hand.map(id => G.cards[id]).filter(y => y !== x && (D(y).colors || []).includes('U')); const b = blues.length === 1 ? blues[0] : __R(ME, G, await pickFromList(blues, `${D(x).name}: elige la carta azul que exilias (pagas 1 vida)`)); if (b) { return fowPay(o, x, b); } }
+  toast('No tienes maná suficiente para responder con esta carta.', true); return false;
 }
 function imprintScore(c) { const ops = AB(c).spell; if (ops.some(o => o.k === 'untapAllNL')) return 30; if (ops.some(o => o.k === 'counter')) return 12; if (ops.some(o => ['draw', 'visions'].includes(o.k))) return 10; if (ops.some(o => ['destroy', 'exile', 'bounce', 'dmg'].includes(o.k))) return 9; return 2 + (D(c).cmc || 0); }
 function imprintDo(s, src, pick) { moveCard(pick, 'exile'); pick.exBy = src.id; src.linked = [pick.id]; log(`${pn(s)} imprime ${cn(pick)} en ${cn(src)}.`); }
@@ -4415,7 +4416,7 @@ async function userCastResponse(o, pick) {
   if (pick.zone === 'bf') { __R(ME, G, await userRespondAct(o, pick)); return; }
   { const ov = abOf(D(pick)).overload; if (ov && pick.zone === 'hand') { pick.overloaded = true; const can = !!solve(o, fullCost(pick, o)); pick.overloaded = false; if (can && __R(ME, G, await askYesNo(`${D(pick).name}: ¿con sobrecarga ${ov.text}?`, 'Devuelve todos los permanentes no tierra que no controlas.'))) pick.overloaded = true; } }
   if (pick.zone === 'exile') { const g = impulseGroupOf(o, pick); if (SET.autoTap) { const sol = solve(o, g && g.anyMana ? anyCost(pick, o) : fullCost(pick, o)); if (sol) pay(o, sol); } useImpulse(o, pick); }
-  else if (SET.autoTap) __R(ME, G, await userPayCardOrAlt(o, pick));
+  else if (!__R(ME, G, await userPayCardOrAlt(o, pick))) return;
   const n0 = UI.prompts.length;
   log(`${pn(o)} responde con ${cn(pick)}.`, 'good');
   __R(ME, G, await castSpell(o, pick));
@@ -4575,7 +4576,7 @@ async function responseWindow(s, c) {
         if (!pick) break;
         if (pick.zone === 'bf' && AB(pick).ewMedic && typeof ewMedicTry === 'function') { if (uncounterable) { toast('Este hechizo no se puede contrarrestar.', true); break; } if (__R(ME, G, await ewMedicTry(o, s, pick, c))) return o; continue; }
         if (fitsCounter(pick)) {
-          if (SET.autoTap) __R(ME, G, await userPayCardOrAlt(o, pick));
+          if (!__R(ME, G, await userPayCardOrAlt(o, pick))) break;
           removeFromZone(pick); pick.zone = null; putZone(pick, 'gy');
           log(`${pn(o)} contrarresta ${cn(c)} con ${cn(pick)}.`, 'good');
           userOps(AB(pick).spell.filter(op => op.k !== 'counter'), { seat: o, src: pick, lastTC: s, that: s, counteredCmc: D(c).cmc || 0 }, pick);
@@ -6252,7 +6253,13 @@ async function userPlay(c) {
   if (isL) {
     if ((G.p[ME].landsPlayed || 0) >= landLimit(ME)) toast('Ya has jugado todas las tierras permitidas este turno (no se bloquea).');
     const n0 = UI.prompts.length;
-    const fromZ = c.zone; G.p[ME].landPlayed = true; G.p[ME].landsPlayed = (G.p[ME].landsPlayed || 0) + 1; log(`Juegas ${cn(c)}${fromZ === 'gy' ? ' desde tu cementerio' : fromZ === 'lib' ? ' desde arriba de tu biblioteca' : fromZ === 'exile' ? ' desde el exilio' : ''} (tierra ${G.p[ME].landsPlayed} de ${landLimit(ME)} este turno).`); moveCard(c, 'bf', { ctl: ME }); onLandPlayed(ME); sba(); render();
+    const entryLife = AB(c).tapUnless?.payLife;
+    if (entryLife) {
+      UI.busy = true;
+      try { c.mcEntryLife = G.p[ME].life >= entryLife && G.p[ME].lifeLock !== G.turnsTaken && !!__R(ME, G, await askYesNo(`${D(c).name}: ¿pagar ${entryLife} vidas?`, 'Sí: entra enderezada salvo otros efectos. No: entra girada.')); }
+      finally { UI.busy = false; }
+    }
+    const fromZ = c.zone; G.p[ME].landPlayed = true; G.p[ME].landsPlayed = (G.p[ME].landsPlayed || 0) + 1; log(`Juegas ${cn(c)}${fromZ === 'gy' ? ' desde tu cementerio' : fromZ === 'lib' ? ' desde arriba de tu biblioteca' : fromZ === 'exile' ? ' desde el exilio' : ''} (tierra ${G.p[ME].landsPlayed} de ${landLimit(ME)} este turno).`); try { moveCard(c, 'bf', { ctl: ME }); } finally { delete c.mcEntryLife; } onLandPlayed(ME); sba(); render();
     { const who = ME; showPlay(who, () => ({ minor: true, sub: esc(G.p[who].name), cards: [c], title: `${pn(who)} juega ${cn(c)}` })); }
     UI.busy = true;
     try { while (UI.prompts.length > n0 && G && !G.over) __R(ME, G, await resolvePrompt(UI.prompts[n0].id)); } finally { UI.busy = false; render(); }
@@ -6287,10 +6294,11 @@ async function userPlay(c) {
       if (g) { moveCard(g, 'exile'); log(`Exilias ${cn(g)} para lanzar ${cn(c)} sin pagar su coste.`); altPaid = true; }
     }
   }
-  if (SET.autoTap && !altPaid) {
+  if (!altPaid) {
     let cst = fullCost(c, ME); if (c.anyManaCast) { cst = Object.assign({}, cst, { generic: cst.generic + cst.pips.length, pips: [] }); c.anyManaCast = false; }
-    const sol = solve(ME, cst);
-    if (sol) pay(ME, sol); else log(`<span style="color:var(--brass2)">No tienes maná suficiente para ${cn(c)}; se lanza igualmente sin girar nada.</span>`);
+    const sol = solve(ME, cst, null, !SET.autoTap);
+    if (!sol) { toast('No tienes maná suficiente para lanzar esta carta.', true); render(); return; }
+    pay(ME, sol);
   }
   UI.busy = true;
   const n0 = UI.prompts.length;
@@ -7345,7 +7353,7 @@ async function doAct(a, el) {
 }
 document.addEventListener('keydown', e => {
   if (!G) return;
-  if (e.target.closest('input,textarea,select')) return;
+  if (e.target instanceof Element && e.target.closest('input,textarea,select,[contenteditable="true"]')) return;
   if (e.key === 'p' || e.key === 'P') { e.preventDefault(); setPause(!UI.paused); return; }
   if (e.key === 'm' || e.key === 'M') { if (UI.reveal) { e.preventDefault(); UI.revMin = !UI.revMin; renderReveal(); return; } if (UI.modalKind && (UI.modalMin || MIN_KINDS.includes(UI.modalKind))) { e.preventDefault(); UI.modalMin = !UI.modalMin; $('#modal').hidden = UI.modalMin; renderPeek(); return; } }
   if (UI.modalMin && UI.modalKind) { if (e.code === 'Space' || e.key === 'Enter') { e.preventDefault(); UI.modalMin = false; $('#modal').hidden = false; renderPeek(); } return; }
@@ -8098,7 +8106,7 @@ function netSend(m) { if (NET.link && NET.link.open) NET.link.send(Object.assign
 const netClientOn = () => NET.mode === 'client' && NET.inGame;
 // a real event on this computer acts as its player, in the game that player is in
 function hostCtx() { ME = 0; if (tourOn()) G = GOF[0] || null; }
-function netIsLocal(t) { return !!(t.closest('.topbar') || t.closest('#cdeckpop') || t.closest('#tour') || t.closest('#preview') || t.closest('#sidetab') || t.closest('#sidehot')); }
+function netIsLocal(t) { return !!(t.closest('.topbar') || t.closest('#cdeckpop') || t.closest('#tour') || t.closest('#preview') || t.closest('#sidetab') || t.closest('#sidehot') || t.closest('.mc-voice-panel')); }
 ['click', 'dblclick', 'contextmenu'].forEach(type => window.addEventListener(type, e => {
   if (!e.isTrusted) return;
   if (!netClientOn()) { hostCtx(); return; }
@@ -8125,11 +8133,11 @@ function netIsLocal(t) { return !!(t.closest('.topbar') || t.closest('#cdeckpop'
 window.addEventListener('keydown', e => {
   if (!e.isTrusted) return;
   if (!netClientOn()) { hostCtx(); return; }
-  if (e.target.closest && e.target.closest('input,textarea,select')) { e.stopPropagation(); return; }
+  if (e.target instanceof Element && (netIsLocal(e.target) || e.target.closest('input,textarea,select,[contenteditable="true"]'))) { if (e.target.closest('input,textarea,select,[contenteditable="true"]')) e.stopPropagation(); return; }
   e.stopPropagation();
   const keys = [' ', 'Enter', 'Escape', 'd', 'D', 't', 'T', 'a', 'A', 'n', 'N', 'p', 'P', 'm', 'M', 'z', 'Z'];
   if (!keys.includes(e.key)) return;
-  if (e.code === 'Space') e.preventDefault();
+  if (e.code === 'Space') { e.preventDefault(); if (e.repeat) return; }
   netSend({ type: 'key', key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey });
 }, true);
 window.addEventListener('mouseover', e => {
