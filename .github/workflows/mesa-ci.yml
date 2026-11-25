@@ -1,0 +1,47 @@
+name: Mesa Commander CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm run check
+      - run: node --check server/voice.js
+      - run: node --test tests/*.test.mjs
+  xmage-proxy-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NEXUS_FORK_DIR: ${{ github.workspace }}/xmage-fork
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Adamychen/xmage-nexus
+          ref: 779c38624c0de265a679fa947bb771e01a9f0414
+          path: xmage-nexus
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Adamychen/xmage-nexus
+          ref: 82a5d9a7f6ee202e5944d44ce30a4ffb5de170c5
+          path: xmage-fork
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Test pinned upstream proxy
+        working-directory: xmage-nexus
+        run: node scripts/test.mjs java

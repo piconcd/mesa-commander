@@ -11,6 +11,7 @@
   let joining = false;
   let muted = false;
   let epoch = 0;
+  let activeLink = null;
   let iceServers = [{ urls: ['stun:stun.l.google.com:19302'] }];
   let voiceStatus = '';
   const peers = new Map(); // id -> {pc, audio, pendingIce, signalQueue}
@@ -117,7 +118,8 @@
   }
   function stopVoice(notify = true) {
     epoch++;
-    if (notify && active) send({ t: 'voice-leave' });
+    if (notify && active && activeLink === NET.link) send({ t: 'voice-leave' });
+    activeLink = null;
     active = false;
     joining = false;
     muted = false;
@@ -136,12 +138,17 @@
       return;
     }
     joining = true;
+    activeLink = NET.link;
     const attempt = ++epoch;
     showPanel();
     message('Solicitando acceso al micrófono…');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
-      if (attempt !== epoch || !seated()) { stream.getTracks().forEach(t => t.stop()); return; }
+      if (attempt !== epoch || !seated() || activeLink !== NET.link) {
+        stream.getTracks().forEach(t => t.stop());
+        if (attempt === epoch) stopVoice(false);
+        return;
+      }
       microphone = stream;
       active = true;
       joining = false;
@@ -151,6 +158,7 @@
     } catch (e) {
       if (attempt !== epoch) return;
       joining = false;
+      activeLink = null;
       message(e?.name === 'NotAllowedError' ? 'Permiso de micrófono denegado. Actívalo en los ajustes del navegador.' : 'No se pudo activar el micrófono: ' + (e.message || 'revisa el dispositivo'), true);
       render();
     }
@@ -211,7 +219,7 @@
   }
   window.__voiceOnMessage = m => {
     if (!m || typeof m.t !== 'string' || !m.t.startsWith('voice-')) return false;
-    if (!active) return true;
+    if (!active || activeLink !== NET.link) return true;
     if (m.t === 'voice-roster') {
       iceServers = Array.isArray(m.iceServers) ? m.iceServers : iceServers;
       members.clear();
@@ -253,7 +261,7 @@
     });
   });
   setInterval(() => {
-    if ((active || joining) && !seated()) { stopVoice(false); message('Conexión con el servidor perdida. Vuelve a entrar al canal de voz.'); }
+    if ((active || joining) && (!seated() || activeLink !== NET.link)) { stopVoice(false); message('Conexión con el servidor perdida. Vuelve a entrar al canal de voz.'); }
     render();
   }, 1200);
   window.addEventListener('pagehide', () => stopVoice());

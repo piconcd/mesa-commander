@@ -5348,6 +5348,7 @@ async function botTurn(s) {
   __R(ME, G, await suspendStep(s)); if (G.over || p.dead) return;
   xDrawStep(s); sba(); if (G.over || p.dead) return;
   G.drawStep = s; try { if (G.turnsTaken > 0 && !permsOf(s).some(x => AB(x).skipDraw)) drawCards(s, 1); } finally { G.drawStep = null; }
+  G.phase = 'main';
   __R(ME, G, await mainPhaseTriggers(s));
   sagaStep(s); __R(ME, G, await flushPendingCasts());
   sba(); if (G.over || p.dead) return;
@@ -5387,9 +5388,13 @@ async function userTurn(s) {
   __R(ME, G, await suspendStep(s)); if (G.over || p.dead) return;
   xDrawStep(s); sba(); if (G.over || p.dead) return;
   G.drawStep = s; try { if (SET.autoDraw && G.turnsTaken > 0 && !permsOf(s).some(x => AB(x).skipDraw)) drawCards(s, 1); } finally { G.drawStep = null; }
+  G.phase = 'main'; UI.busy = true;
   __R(ME, G, await mainPhaseTriggers(s));
   sagaStep(s);
   sba();
+  if (G.over || p.dead) { UI.busy = false; return; }
+  if (UI.prompts.length) { __R(ME, G, await resolveNewPrompts(0)); sba(); }
+  if (G.over || p.dead) { UI.busy = false; return; }
   __R(ME, G, await radStep(s));
   if (G.over || p.dead) return;
   G.phase = 'main'; undoClear(); UI.busy = false; render();
