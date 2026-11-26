@@ -4929,6 +4929,7 @@ async function doCombat(s, attacks) {
   for (const a of attacks) {
     const c = G.cards[a.id]; if (!c || c.zone !== 'bf') continue;
     if (AB(c).attack.length) trigger(c, AB(c).attack, { def: a.to });
+    if (c.avFireT && c.avFireT.turn === G.turnsTaken) trigger(c, [{ k: 'avFire', n: c.avFireT.n }], { def: a.to });
     for (const x of permsOf(s)) if (AB(x).allyAttacks.length) trigger(x, AB(x).allyAttacks, { def: a.to });
     for (const x of permsAll()) if (x.att === c.id && AB(x).equipAttack && AB(x).equipAttack.length) trigger(x, AB(x).equipAttack, { def: a.to });
     if (AB(c).xkw && AB(c).xkw.has('mentor')) { const tg = bestBy(attacks.map(q => G.cards[q.id]).filter(q => q && q !== c && q.zone === 'bf' && P(q) < P(c)), q => value(q)); if (tg) { const k = addCounters(tg, 1, 'p1', true); log(`${cn(c)} instruye a ${cn(tg)} (+${k}).`); } }
@@ -14236,8 +14237,17 @@ const XPROMPT_T = {
    · Waterbend {N}: «While paying a waterbend cost, you can tap your artifacts and creatures to help. Each one pays for {1}.»
    «Whenever you …bend» is not handled here yet.
    ===================================================================== */
-function avSentence(t) {
+function avSentence(t, orig) {
   let m;
+  if ((m = t.match(/^each creature you control gains firebending (\d+) until end of turn$/))) return [{ k: 'avFireAll', n: +m[1] }];
+  if (orig && (m = t.match(/^(create (?:a|an|one|two|three|four|\d+) \d+\/\d+ [a-z ]+? creature tokens?) with firebending (\d+)$/))) {
+    const ops = orig(m[1] + ' with haste'); const tk = ops.length === 1 && ops[0].k === 'tokens' ? ops[0] : null;
+    if (!tk) return null;
+    return [Object.assign({}, tk, { kws: tk.kws.filter(k => k !== 'haste').concat('firebending ' + m[2]) })];
+  }
+  // Clue: «an artifact with "{2}, Sacrifice this artifact: Draw a card."»; investigate = create a Clue token
+  if ((m = t.match(/^(?:you )?create (a|an|one|two|three|\d+) clue tokens?$/))) return [{ k: 'avClue', n: num(m[1]) }];
+  if ((m = t.match(/^investigate(?: (twice|three times))?$/))) return [{ k: 'avClue', n: m[1] === 'twice' ? 2 : m[1] ? 3 : 1 }];
   if ((m = t.match(/^airbend (up to one )?(other |another )?target (nonland permanent|creature)( you control)?$/))) return [{ k: 'avAirbend', f: m[3], mine: !!m[4], other: !!m[2], upTo: !!m[1] }];
   if ((m = t.match(/^(?:you )?earthbend (\d+|one|two|three|four|five|six)(?:, then earthbend (\d+|one|two|three|four|five|six))?$/))) return [m[1], m[2]].filter(Boolean).map(w => ({ k: 'avEarthbend', n: num(w) }));
   if ((m = t.match(/^earthbend x, where x is the number of (forests you control|cards in your hand|creatures you control with power 4 or greater)$/))) return [{ k: 'avEarthbend', n: 0, nX: { 'forests you control': 'forests', 'cards in your hand': 'hand', 'creatures you control with power 4 or greater': 'pow4' }[m[1]] }];
@@ -14245,11 +14255,11 @@ function avSentence(t) {
 }
 // a text with airbend/earthbend is read sentence by sentence; if any sentence is not understood, nothing is (no half effects)
 { const _pe = parseEffects; parseEffects = function (s) {
-  if (!/\b(?:air|earth)bend\b/.test(s || '')) return _pe(s);
+  if (!/\b(?:air|earth)bend\b|\bfirebending \d|\bclue tokens?\b|\binvestigate\b/.test(s || '')) return _pe(s);
   const parts = String(s).trim().replace(/\.$/, '').split(/\.\s+/).map(p => p.trim()).filter(Boolean);
-  if (!parts.some(p => avSentence(p))) return _pe(s);
+  if (!parts.some(p => avSentence(p, _pe))) return _pe(s);
   const out = [];
-  for (const p of parts) { const ops = avSentence(p) || _pe(p); if (!ops.length) return []; out.push(...ops); }
+  for (const p of parts) { const ops = avSentence(p, _pe) || _pe(p); if (!ops.length) return []; out.push(...ops); }
   return out;
 }; }
 // «firebending N» (alone or in a keyword line) and «firebending X, where X is …»
@@ -14257,6 +14267,11 @@ function avLine(a, l) {
   const t = l.replace(/\.$/, '');
   let m = t.match(/^firebending x, where x is (~'s power|the number of creatures you control)$/);
   if (m) { a.attack.push({ k: 'avFire', n: m[1] === "~'s power" ? 'pow' : 'cre' }); return true; }
+  m = t.match(/^~ has firebending (\d+) as long as there's a lesson card in your graveyard$/);
+  if (m) { a.attack.push({ k: 'avFire', n: +m[1], ifLessonGy: true }); return true; }
+  if (/^whenever you waterbend, earthbend, firebend, or airbend, draw a card\. then if you've done all four this turn, transform ~$/.test(t)) { a.avBendTrig = [{ k: 'draw', n: 1 }, { k: 'avAllFour' }]; return true; }
+  // «~ enters tapped unless you control a basic land»
+  if (/^~ enters tapped unless you control a basic land$/.test(t)) { a.tapUnless = { basic1: true }; return true; }
   const parts = t.split(/,\s*/);
   const fire = parts.map(p => p.match(/^firebending (\d+)$/)).filter(Boolean);
   if (fire.length !== 1 || !parts.every(p => /^firebending \d+$/.test(p) || KW_LIST.includes(p))) return false;
@@ -14287,6 +14302,7 @@ Object.assign(XOPS, {
     moveCard(t, 'exile');
     if (!tok && t.zone === 'exile') { (G.p[o].impulse || (G.p[o].impulse = [])).push({ ids: [t.id], left: 9999, alt: { generic: 2, pips: [] }, src: 'Airbend' }); log(`${name} sale despedida por el aire: ${pn(o)} puede lanzarla desde el exilio por {2}.`); }
     else log(`${name} sale despedida por el aire.`);
+    avBend(ctx.seat, 'air');
   },
   avEarthbend(op, ctx, t) {
     if (!t || t.zone !== 'bf' || !isLand(t)) return;
@@ -14298,25 +14314,60 @@ Object.assign(XOPS, {
     if (n > 0) addCounters(t, n, 'p1', true);
     recomputeMods();
     log(`${pn(s)} hace tierra-control: ${cn(t)} es una criatura 0/0 con prisa${n > 0 ? ` y ${n} contador${n > 1 ? 'es' : ''} +1/+1` : ''}.`);
+    avBend(s, 'earth');
   },
   avFire(op, ctx) {
     const s = ctx.seat; const src = ctx.src ? (G.cards[ctx.src.id] || ctx.src) : null;
+    if (op.ifLessonGy && !G.p[s].gy.some(id => /\blesson\b/i.test(D(G.cards[id]).type_line || ''))) return;
     const n = op.n === 'pow' ? (src && src.zone === 'bf' ? Math.max(0, P(src)) : 0) : op.n === 'cre' ? permsOf(s).filter(isCreature).length : op.n;
     if (!(n > 0)) return;
     const p = G.p[s]; p.pool = p.pool || [];
     for (let i = 0; i < n; i++) p.pool.push({ src: -1, cols: ['R'], cre: false, avCombat: true });
     log(`${src ? cn(src) : pn(s)}: fuego-control, ${pn(s)} añade ${'{R}'.repeat(n)} hasta el final del combate.`);
+    avBend(s, 'fire');
+  },
+  avFireAll(op, ctx) {
+    const s = ctx.seat; const list = permsOf(s).filter(isCreature);
+    for (const c of list) c.avFireT = { n: Math.max(op.n, (c.avFireT && c.avFireT.turn === G.turnsTaken) ? c.avFireT.n : 0), turn: G.turnsTaken };
+    log(`Las criaturas de ${pn(s)} ganan firebending ${op.n} hasta el final del turno.`);
+  },
+  avClue(op, ctx) {
+    const s = ctx.seat; let k = 0;
+    for (let i = 0; i < (op.n || 1); i++) { if (typeof tokenCap === 'function' && tokenCap(s)) break; makeToken(s, CLUE_T); k++; }
+    if (k) log(`${pn(s)} crea ${k === 1 ? 'una ficha de Pista' : k + ' fichas de Pista'}.`);
+  },
+  avAllFour(op, ctx) {
+    const s = ctx.seat; const src = ctx.src ? (G.cards[ctx.src.id] || ctx.src) : null; const b = G.p[s].avBent;
+    if (src && src.zone === 'bf' && b && b.turn === G.turnsTaken && ['water', 'earth', 'fire', 'air'].every(k => b.kinds.includes(k))) tfInPlace(src);
   }
 });
+// «whenever you waterbend, earthbend, firebend, or airbend»: remember what this player bent this turn and trigger
+function avBend(s, kind) {
+  const p = G.p[s]; if (!p) return;
+  if (!p.avBent || p.avBent.turn !== G.turnsTaken) p.avBent = { turn: G.turnsTaken, kinds: [] };
+  if (!p.avBent.kinds.includes(kind)) p.avBent.kinds.push(kind);
+  for (const x of permsOf(s)) { const t = AB(x).avBendTrig; if (t && t.length) { const src = x; setTimeout0(() => { if (src.zone === 'bf') trigger(src, t); }); } }
+}
+// waterbending happens when a waterbend cost is paid
+{ const _sv = solve; solve = function (s, cost) { const r = _sv.apply(this, arguments); if (r && cost && cost.wb > 0) r.avWb = true; return r; }; }
+{ const _pw = pay; pay = function (s, sol) { const r = _pw.apply(this, arguments); if (sol && sol.avWb) avBend(s, 'water'); return r; }; }
+// «enters tapped unless you control a basic land»
+{ const _etu = etbTapUnless; etbTapUnless = function (c) { const u = AB(c).tapUnless; if (u && u.basic1) return !permsOf(c.ctl).some(x => x.id !== c.id && isLand(x) && /\bbasic\b/i.test(D(x).type_line || '')); return _etu.apply(this, arguments); }; }
+// Convoke on the card itself (rule 702.51): the line was skipped while reading the card; the payment already supports it
+{ const _fcc = fullCost; fullCost = function (c, s) { const r = _fcc(c, s); if (r && /^convoke\b/im.test(D(c).oracle_text || '')) r.convoke = true; return r; }; }
 Object.assign(XTEXT, {
   avAirbend: o => { const fem = o.f === 'creature'; return `Airbend: exiliar ${o.upTo ? 'hasta ' : ''}${o.other ? (fem ? 'otra' : 'otro') : (fem ? 'una' : 'un')} ${fem ? 'criatura' : 'permanente no tierra'}${o.mine ? (fem ? ' tuya' : ' tuyo') : ''}; su dueño puede lanzarlo por {2}`; },
   avEarthbend: o => `Earthbend ${o.nX ? 'X' : o.n}: una tierra tuya es criatura 0/0 con prisa y contadores +1/+1; si muere o se exilia, vuelve girada`,
-  avFire: o => `Firebending ${o.n === 'pow' ? 'X (su fuerza)' : o.n === 'cre' ? 'X (tus criaturas)' : o.n}: añade {R} hasta el final del combate`
+  avFire: o => `Firebending ${o.n === 'pow' ? 'X (su fuerza)' : o.n === 'cre' ? 'X (tus criaturas)' : o.n}${o.ifLessonGy ? ' (si hay una Lección en tu cementerio)' : ''}: añade {R} hasta el final del combate`,
+  avFireAll: o => `Tus criaturas ganan firebending ${o.n} hasta el final del turno`,
+  avClue: o => `Crear ${o.n > 1 ? o.n + ' fichas' : 'una ficha'} de Pista`,
+  avAllFour: () => 'Si este turno has hecho los cuatro bending, se transforma'
 });
 // an earthbent land that dies or is exiled returns to the battlefield tapped
 { const _mv = moveCard; moveCard = function (c, to, opts) {
   const was = c && c.zone; const earth = !!(c && c.avEarth && was === 'bf');
   const r = _mv.apply(this, arguments);
+  if (c && was === 'bf' && c.zone !== 'bf') c.avFireT = null;
   if (earth && c.zone !== 'bf') {
     c.avEarth = false; const z = c.zone;
     if ((z === 'gy' || z === 'exile') && !c.token) setTimeout0(() => { if (c.zone === z && G.cards[c.id] === c) { moveCard(c, 'bf', { ctl: c.owner }); c.tapped = true; log(`${cn(c)} vuelve al campo girada (earthbend).`); } });

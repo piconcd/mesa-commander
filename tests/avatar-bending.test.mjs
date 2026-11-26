@@ -13,7 +13,7 @@ function slice(from, to) {
 
 const NUMW = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
 const num = s => (/^\d+$/.test(s) ? +s : NUMW[s] ?? 1);
-const avSentence = new Function('num', slice('function avSentence(t) {', '// a text with airbend') + '\nreturn avSentence;')(num);
+const avSentence = new Function('num', slice('function avSentence(t, orig) {', '// a text with airbend') + '\nreturn avSentence;')(num);
 
 test('airbend sentences become an airbend effect with the right target', () => {
   assert.deepEqual(avSentence('airbend up to one other target nonland permanent'), [{ k: 'avAirbend', f: 'nonland permanent', mine: false, other: true, upTo: true }]);
@@ -49,7 +49,7 @@ test('firebending lines add an attack trigger and keep the other keywords', () =
   let a = mk(); assert.equal(avLine(a, 'trample, firebending 4, haste'), true);
   assert.deepEqual([...a.kw], ['trample', 'haste']); assert.deepEqual(a.attack, [{ k: 'avFire', n: 4 }]);
   a = mk(); assert.equal(avLine(a, "firebending x, where x is ~'s power."), true); assert.deepEqual(a.attack, [{ k: 'avFire', n: 'pow' }]);
-  a = mk(); assert.equal(avLine(a, "~ has firebending 2 as long as there's a lesson card in your graveyard."), false); assert.equal(a.attack.length, 0);
+  a = mk(); assert.equal(avLine(a, "~ has firebending 2 as long as you control a dragon."), false); assert.equal(a.attack.length, 0);
   a = mk(); assert.equal(avLine(a, 'flying, vigilance'), false);
 });
 
