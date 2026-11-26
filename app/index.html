@@ -15628,6 +15628,370 @@ Object.assign(XTEXT, {
   l10CopyCtr: o => `Un contador ${ctrName(o.kind)} en otra criatura`, l10SelfBottom: () => 'Al fondo de la biblioteca', l10DestroyId: () => 'Destruir esa criatura', l10RevealSaga: () => 'Mostrar hasta una Saga y ponerla en el campo'
 });
 
+/* =====================================================================
+   Avatar: The Last Airbender (tanda 11): «grupo 1» (activated abilities left to the player) and «grupo 2»
+   (cards the engine could already do with what it has).
+   · Exhaust («activate each exhaust ability only once», CR 702.177): Mai, Hog-Monkey, Avatar Kuruk.
+   · Spirit tokens that «can't block or be blocked by non-Spirit creatures» (Realm of Koh, Foggy Swamp Spirit Keeper,
+     Avatar Kuruk).
+   · Statics with a condition: drawn two cards this turn, Lesson in your graveyard, land creature / land entered,
+     «can't attack or block unless…», Platypus-Bear, Air Nomad Legacy, Bender's Waterskin, Flopsie, Cruel Administrator.
+   · X from what you control (op.l11cnt), kicker «instead» (op.l11kick), «if you controlled that permanent»,
+     «if you attacked this turn», and many single effects (see the list in tanda11.md).
+   ===================================================================== */
+if (!CTR_KW.includes('double strike')) CTR_KW.push('double strike'); // keyword counters (CR 122.1b) include double strike
+const l11Src = ctx => ctx && ctx.src ? (G.cards[ctx.src.id] || ctx.src) : null;
+const l11Last = ctx => (ctx && ctx.lastTgt != null && G.cards[ctx.lastTgt]) || null;
+const l11Drawn = (s, n) => { const p = G && G.p[s]; return !!p && p.drawT === G.turnsTaken && (p.drawN || 0) >= n; };
+const l11Lessons = s => G.p[s].gy.filter(id => /\blesson\b/i.test(D(G.cards[id]).type_line || '')).length;
+const l11Attacked = s => permsAll().concat(G.p[s].gy.map(id => G.cards[id])).some(c => c && c.owner === s && c.attackedTurn === G.turnsTaken) || (G.p[s].l11AtkT === G.turnsTaken);
+/* ---------- memory: sacrifices this turn, lands that entered this turn, who attacked ---------- */
+{ const _sac11 = sacrifice; sacrifice = function (c) {
+  const ctl = c && c.zone === 'bf' ? c.ctl : null;
+  const r = _sac11.apply(this, arguments);
+  if (G && ctl != null && G.p[ctl] && c.zone !== 'bf') { const p = G.p[ctl]; if (p.l11SacT !== G.turnsTaken) { p.l11SacT = G.turnsTaken; p.l11SacN = 0; } p.l11SacN++; }
+  return r;
+}; }
+{ const _mc11 = moveCard; moveCard = function (c, to, opts) {
+  const from = c && c.zone;
+  const r = _mc11.apply(this, arguments);
+  try { if (G && c && to === 'bf' && from !== 'bf' && c.zone === 'bf') { c.l11Exh = null; if (isLand(c) && G.p[c.ctl]) G.p[c.ctl].l11LandInT = G.turnsTaken; } } catch (e) { console.error(e); }
+  return r;
+}; }
+{ const _fa11 = fxAttackers; fxAttackers = function (s, attacks, byDef) {
+  if (G && G.p[s] && attacks && attacks.length) G.p[s].l11AtkT = G.turnsTaken;
+  const r = _fa11.apply(this, arguments);
+  try {
+    const atk = (attacks || []).map(a => G.cards[a.id]).filter(c => c && c.zone === 'bf');
+    for (const x of permsOf(s)) {
+      const a = AB(x);
+      if (a.l11Alone && atk.length === 1) trigger(x, [{ k: 'l11PumpCre', id: atk[0].id }]);
+      if (a.l11FlyAtk && atk.some(c => hasKw(c, 'flying'))) trigger(x, [{ k: 'l11Teo' }]);
+      if (a.l11Sokka && atk.includes(x) && atk.length >= 2) trigger(x, [{ k: 'draw', n: 1 }]);
+      if (a.l11EarthKing) { const n = atk.filter(c => P(c) >= 4).length; if (n) trigger(x, [{ k: 'ramp', n, types: ['land'], basic: true, what: 'basic', dest: 'bf', tapped: true }]); }
+    }
+  } catch (e) { console.error(e); }
+  return r;
+}; }
+/* ---------- conditions ---------- */
+{ const _fc11 = fxCond; fxCond = function (cond, s, c) {
+  if (typeof cond === 'string' && cond.startsWith('l11')) {
+    if (cond.startsWith('l11drawn:')) return l11Drawn(s, +cond.slice(9));
+    if (cond.startsWith('l11lesson:')) return l11Lessons(s) >= +cond.slice(10);
+    if (cond === 'l11landcre') return permsOf(s).some(x => isLand(x) && isCreature(x)) || G.p[s].l11LandInT === G.turnsTaken;
+    return false;
+  }
+  return _fc11(cond, s, c);
+}; }
+{ const _cc11 = cdCond; cdCond = function (c) {
+  if (/^you attacked this turn$/.test(c)) return { k: 'l11attacked', text: c };
+  if (/^you controlled that permanent$/.test(c)) return { k: 'l11tgtMine', text: c };
+  return _cc11(c);
+}; }
+{ const _co11 = cdOk; cdOk = function (sp, ctx) {
+  if (sp && sp.k === 'l11attacked') return !!ctx && l11Attacked(ctx.seat);
+  if (sp && sp.k === 'l11tgtMine') return !!ctx && ctx.l11TgtCtl === ctx.seat;
+  return _co11(sp, ctx);
+}; }
+// «X = the number of … you control» (op.l11cnt), «… instead if this spell was kicked» (op.l11kick), remember who
+// controlled the marked target before the op (Boomerang Basics)
+{ const _ao11 = applyOp; applyOp = function (op, ctx, t) {
+  if (op && ctx && G) {
+    if (op.l11cnt) { op = Object.assign({}, op, { n: (op.l11plus || 0) + l9Count(op.l11cnt, ctx.seat) }); delete op.l11cnt; }
+    if (op.l11kick && ctx.kicked) { op = Object.assign({}, op, { n: op.l11kick }); }
+    if (op.l7mark && t && t.ctl != null) ctx.l11TgtCtl = t.ctl;
+  }
+  return _ao11.call(this, op, ctx, t);
+}; }
+{ const _ai11 = aiTarget; aiTarget = function (op, ctx) {
+  if (op && ctx && G && op.l11cnt) op = Object.assign({}, op, { n: (op.l11plus || 0) + l9Count(op.l11cnt, ctx.seat) });
+  else if (op && ctx && op.l11kick && ctx.kicked) op = Object.assign({}, op, { n: op.l11kick });
+  return _ai11.call(this, op, ctx);
+}; }
+{ const _ct11 = l9CountSpec; l9CountSpec = function (txt) {
+  if (/^the number of creatures you control with \+1\/\+1 counters on them$/.test(txt)) return ['l11withP1'];
+  return _ct11(txt);
+}; }
+{ const _cn11 = l9Count; l9Count = function (spec, s) { if (spec && spec[0] === 'l11withP1') return permsOf(s).filter(c => isCreature(c) && (c.cnt.p1 || 0) > 0).length; return _cn11(spec, s); }; }
+/* ---------- statics in recompute / blocks / untap ---------- */
+{ const _rm11 = recomputeMods; recomputeMods = function () {
+  const r = _rm11.apply(this, arguments);
+  try {
+    if (!G) return r;
+    const M = c => c.mods || (c.mods = newMods());
+    for (const c of permsAll()) {
+      const a = AB(c); const u = a.l11CantAB;
+      if (u) { const ok = u.lesson ? l11Lessons(c.ctl) >= u.lesson : permsOf(c.ctl).some(x => x !== c && isCreature(x) && P(x) >= u.pow); if (!ok) { M(c).cantAtk = true; M(c).cantBlk = true; } }
+      const w = c.l11While; if (w) { const src = G.cards[w.src]; if (src && src.zone === 'bf' && src.ctl === w.ctl) { if (w.noUntap) M(c).noUntap = true; } else c.l11While = null; }
+    }
+  } catch (e) { console.error(e); }
+  return r;
+}; }
+{ const _fdo = fxDefOff; fxDefOff = function (c) { if (G && c && c.zone === 'bf' && AB(c).l11DefLesson && l11Lessons(c.ctl) >= 1) return true; return _fdo.apply(this, arguments); }; }
+{ const _cb11 = canBlock; canBlock = function (b, a) {
+  if (a && b && G) {
+    if ((AB(a).l11SpiritOnly && !isType(b, 'spirit')) || (AB(b).l11SpiritOnly && !isType(a, 'spirit'))) return false;
+    if (AB(a).l11UnblDrawn && l11Drawn(a.ctl, AB(a).l11UnblDrawn)) return false;
+    if (a.l11UnblT === G.turnsTaken) return false;
+  }
+  return _cb11.apply(this, arguments);
+}; }
+{ const _lb11 = lotrBlocks; lotrBlocks = function (blocks) {
+  try {
+    if (G && blocks) { const by = {}; for (const [b, at] of Object.entries(blocks)) (by[at] ||= []).push(b);
+      for (const [aid, bids] of Object.entries(by)) { const a = G.cards[aid]; if (!a || bids.length < 2 || P(a) < 4 || !permsOf(a.ctl).some(x => AB(x).l11Flopsie)) continue; for (const b of bids.slice(1)) delete blocks[b]; log(`${cn(a)} no puede ser bloqueada por más de una criatura: solo vale el primer bloqueo.`); } }
+  } catch (e) { console.error(e); }
+  return _lb11.apply(this, arguments);
+}; }
+{ const _bt11 = beginTurn; beginTurn = function (s) {
+  const r = _bt11.apply(this, arguments);
+  try { if (G) for (const c of permsAll()) if (c.ctl !== s && AB(c).l11UntapOthers && c.tapped) { c.tapped = false; log(`${cn(c)} se endereza en el paso de enderezar de ${pn(s)}.`); } } catch (e) { console.error(e); }
+  return r;
+}; }
+// grants: «creatures you control with flying get +1/+1» (Air Nomad Legacy) through the tanda 9 anthems (l9Grants)
+{ const _go = l9GrantOk; l9GrantOk = function (g, x, c) { if (g && g.kwReq && !(c && hasKw(c, g.kwReq))) return false; return _go.apply(this, arguments); }; }
+// «enters with a +1/+1 counter on it if you attacked this turn» (Cruel Administrator)
+{ const _oe11 = onEnter; onEnter = function (c) {
+  try { if (G && c && c.zone === 'bf' && abOf(D(c)).l11EntersIfAtk && l11Attacked(c.ctl)) c.cnt.p1 = (c.cnt.p1 || 0) + 1; } catch (e) { console.error(e); }
+  return _oe11.apply(this, arguments);
+}; }
+
+/* ---------- lines ---------- */
+function l11Line(a, l) {
+  let m; const t = l.replace(/\.$/, ''); const PE = parseEffects;
+  const act = o => { a.acts.push(Object.assign({ generic: 0, pips: [], tap: false, sac: false, sacOther: null, life: 0, cond: {} }, o)); return true; };
+  const self = (cond, p, tt, kwTxt) => { const k = kwTxt ? kwList(kwTxt) : []; if (kwTxt && k.join(' and ') !== kwTxt.replace(/,? and |, /g, ' and ')) return false; (a.selfCond ||= []).push({ cond, p, t: tt, kw: k }); return true; };
+  // exhaust — <cost>: <effect>   (once per object; waterbend costs use act.wb like the tanda 3 code)
+  if ((m = t.match(/^exhaust — (waterbend )?((?:\{[^}]+\})+): (.+)$/))) {
+    const pc = parseCost(m[2]); const ops = PE(m[3]); if (!ops.length || !l7Safe(m[3], ops)) return false;
+    const o = { generic: pc.generic, pips: pc.pips, ops: [{ k: 'l11ExhMark' }, ...ops], cond: { l11Exh: true }, text: `Agotamiento — ${m[1] ? 'waterbend ' : ''}${m[2].toUpperCase()}: ${m[3]}` };
+    if (m[1]) o.wb = pc.generic; return act(o);
+  }
+  if (/^(?:~|this token|this creature) can't block or be blocked by non-(?:spirit|~) creatures$/.test(t)) { a.l11SpiritOnly = true; return true; }
+  // statics
+  if ((m = t.match(/^~ gets \+(\d+)\/\+(\d+) as long as there's a lesson card in your graveyard$/))) return self('l11lesson:1', +m[1], +m[2]);
+  if ((m = t.match(/^as long as you've drawn (\w+) or more cards this turn, ~ has ([a-z ,]+)$/)) && cdNum(m[1]) > 0) return self('l11drawn:' + cdNum(m[1]), 0, 0, m[2]);
+  if ((m = t.match(/^~ gets \+(\d+)\/\+(\d+) as long as you've drawn (\w+) or more cards this turn$/)) && cdNum(m[3]) > 0) return self('l11drawn:' + cdNum(m[3]), +m[1], +m[2]);
+  if ((m = t.match(/^~ can't be blocked as long as you've drawn (\w+) or more cards this turn$/)) && cdNum(m[1]) > 0) { a.l11UnblDrawn = cdNum(m[1]); return true; }
+  if ((m = t.match(/^~ gets \+(\d+)\/\+(\d+) and has ([a-z ]+) as long as you control a land creature or a land entered the battlefield under your control this turn$/))) return self('l11landcre', +m[1], +m[2], m[3]);
+  if ((m = t.match(/^~ can't attack or block unless there are (\w+) or more lesson cards in your graveyard$/)) && cdNum(m[1]) > 0) { a.l11CantAB = { lesson: cdNum(m[1]) }; return true; }
+  if ((m = t.match(/^~ can't attack or block unless you control another creature with power (\d+) or greater$/))) { a.l11CantAB = { pow: +m[1] }; return true; }
+  if (/^as long as there is a lesson card in your graveyard, ~ can attack as though it didn't have defender$/.test(t)) { a.l11DefLesson = true; return true; }
+  if ((m = t.match(/^creatures you control with (flying|[a-z ]+?) get \+(\d+)\/\+(\d+)$/)) && KW_LIST.includes(m[1])) { (a.l9Grants ||= []).push({ other: false, p: +m[2], t: +m[3], kws: [], ward: 0, kwReq: m[1] }); return true; }
+  if (/^untap ~ during each other player's untap step$/.test(t)) { a.l11UntapOthers = true; return true; }
+  if (/^each creature you control with power 4 or greater can't be blocked by more than one creature$/.test(t)) { a.l11Flopsie = true; return true; }
+  if (/^~ enters with a \+1\/\+1 counter on it if you attacked this turn$/.test(t)) { a.l11EntersIfAtk = true; return true; }
+  // triggers
+  if (/^whenever another permanent you control leaves the battlefield during your turn, create a 1\/1 white ally creature token\. this ability triggers only once each turn$/.test(t)) {
+    const tok = PE('create a 1/1 white ally creature token'); if (tok.length !== 1) return false;
+    return x26Trig(a, { ev: 'x26leave', who: 'you', run: (x, info) => { if (!info.c || info.c.id === x.id || x.zone !== 'bf' || G.active !== x.ctl || !x26TurnOnce(x, 'l11suki')) return; trigger(x, tok); } });
+  }
+  if (/^whenever a creature you control attacks alone, it gets \+x\/\+x until end of turn, where x is the number of creatures you control$/.test(t)) { a.l11Alone = true; return true; }
+  if (/^whenever one or more creatures you control with flying attack, draw a card, then discard a card\. when you discard a nonland card this way, put a \+1\/\+1 counter on target creature you control$/.test(t)) { a.l11FlyAtk = true; return true; }
+  if (/^whenever ~ and at least one other creature attack, draw a card$/.test(t)) { a.l11Sokka = true; return true; }
+  if (/^whenever one or more creatures you control with power 4 or greater attack, search your library for up to that many basic land cards, put them onto the battlefield tapped, then shuffle$/.test(t)) { a.l11EarthKing = true; return true; }
+  if (/^whenever another creature you control dies, if it had counters on it, put its counters on ~$/.test(t))
+    return x26Trig(a, { ev: 'x26leave', who: 'you', run: (x, info) => { const c = info.c; if (!c || c.id === x.id || !info.wasCre || info.intended !== 'gy' || c.zone === 'bf' || x.zone !== 'bf') return; const ctrs = Object.entries(info.ctrs || {}).filter(([k, v]) => v > 0 && k !== 'loy'); if (ctrs.length) trigger(x, [{ k: 'l11PutCtrs', list: ctrs }]); } });
+  if (/^whenever you put one or more \+1\/\+1 counters on a creature, you may gain that much life\. do this only once each turn$/.test(t))
+    return x26Trig(a, { ev: 'x26ctr', who: 'you', run: (x, info) => { if (info.kind !== 'p1' || !(info.n > 0) || !info.c || !isCreature(info.c) || (x.x26u || {})['l11ekg@' + G.turnsTaken]) return; trigger(x, [{ k: 'l11MayGain', n: info.n }]); } });
+  if (/^whenever a nonland creature you control dies, earthbend x, where x is that creature's power$/.test(t))
+    return x26Trig(a, { ev: 'dies', who: 'you', self: true, run: (x, info) => { const c = info.c; if (!c || /\bland\b/i.test(D(c).type_line || '')) return; const n = Math.max(0, c._lastP != null ? c._lastP : P(c)); if (n > 0) trigger(x, [{ k: 'avEarthbend', n }]); } });
+  if (/^whenever you cast a lesson, saga, or shrine spell, put a \+1\/\+1 counter on another target creature you control$/.test(t))
+    return x26Trig(a, { ev: 'x26cast', who: 'you', run: (x, info) => { if (!info.c || !/\b(lesson|saga|shrine)\b/i.test(D(info.c).type_line || '')) return; trigger(x, [{ k: 'counterT', n: 1, f: 'creature you control', l8other: true }]); } });
+  if (/^whenever another creature you control or a land you control is put into a graveyard from the battlefield, put a \+1\/\+1 counter on target creature you control$/.test(t))
+    return x26Trig(a, { ev: 'x26leave', who: 'you', run: (x, info) => { const c = info.c; if (!c || c.id === x.id || info.intended !== 'gy' || c.zone === 'bf' || !(info.wasCre || /\bland\b/i.test(D(c).type_line || ''))) return; trigger(x, [{ k: 'counterT', n: 1, f: 'creature you control' }]); } });
+  if (/^whenever you cast a spell, earthbend 1\. if that spell is a lesson, put an additional \+1\/\+1 counter on that land$/.test(t))
+    return x26Trig(a, { ev: 'x26cast', who: 'you', run: (x, info) => { const les = !!(info.c && /\blesson\b/i.test(D(info.c).type_line || '')); trigger(x, [{ k: 'avEarthbend', n: les ? 2 : 1 }]); } });
+  return false;
+}
+{ const _el = eoeLine; eoeLine = function (a, l, PE) { if (l11Line(a, l)) return true; return _el(a, l, PE); }; }
+{ const _lac11 = lotrActCond; lotrActCond = function (k, c, s) { if (k && k.l11Exh && c && c.l11Exh) return 'Agotamiento: esta habilidad ya se ha activado.'; return _lac11.apply(this, arguments); }; }
+
+/* ---------- whole sentences ---------- */
+function l11Sentence(s, pe) {
+  let m;
+  const kick = { k: 'kicked', text: 'this spell was kicked' }; const notKick = { not: kick, text: kick.text };
+  if (/^search your library for a basic land card\. if this spell was kicked, instead search your library for a basic land card and a shrine card\. reveal those cards, put them into your hand, then shuffle$/.test(s)) {
+    const b = pe('search your library for a basic land card, reveal it, put it into your hand, then shuffle'), sh = pe('search your library for a shrine card, reveal it, put it into your hand, then shuffle');
+    if (b.length !== 1 || sh.length !== 1) return null;
+    return [Object.assign({}, b[0], { cnd: notKick }), Object.assign({}, b[0], { cnd: kick }), Object.assign({}, sh[0], { cnd: kick })];
+  }
+  if (/^exile up to one target creature you control, then return it to the battlefield under its owner's control$/.test(s)) return [{ k: 'l11BlinkMine' }];
+  if (/^untap one or two target creatures\. they each get \+2\/\+2 until end of turn$/.test(s)) return [{ k: 'l11Fancy', n: 2, p: 2, t: 2 }];
+  if (/^~ deals 4 damage to target attacking or blocking creature\. you gain life equal to the excess damage dealt this way$/.test(s)) return [{ k: 'l11Razor', n: 4 }];
+  if (/^you gain 1 life\. if this is the second time this ability has resolved this turn, draw a card$/.test(s)) return [{ k: 'gain', n: 1 }, { k: 'l11Second' }];
+  if ((m = s.match(/^put x \+1\/\+1 counters on each creature you control, where x is (.+)$/))) { const sp = l9CountSpec(m[1]); return sp ? [{ k: 'l11CtrEach', cnt: sp }] : null; }
+  if ((m = s.match(/^each opponent loses x life and you gain x life, where x is (.+)$/))) { const sp = l9CountSpec(m[1]); return sp ? [{ k: 'l11Drain', cnt: sp }] : null; }
+  if ((m = s.match(/^search your library for up to x basic land cards, where x is (.+?)\. put those cards onto the battlefield tapped, then shuffle$/))) { const sp = l9CountSpec(m[1]); const r = pe('search your library for up to two basic land cards, put them onto the battlefield tapped, then shuffle'); if (!sp || r.length !== 1) return null; return [Object.assign({}, r[0], { l11cnt: sp })]; }
+  if ((m = s.match(/^(?:it|he|she|~) deals damage equal to (2 plus )?(the number of .+?) to (any target|target creature an opponent controls|target creature)$/))) {
+    if (m[1]) return null; const sp = l9CountSpec(m[2]); if (!sp) return null; const f = m[3].replace(/^target /, ''); return [{ k: 'dmg', n: 0, f, l11cnt: sp }];
+  }
+  if (/^choose target creature an opponent controls\. tap it, then you may sacrifice an artifact or creature\. if you do, put a stun counter on the chosen creature$/.test(s)) {
+    const may = pe('you may sacrifice an artifact or creature. if you do, draw a card'); if (may.length !== 1 || may[0].k !== 'cdMay') return null;
+    return [{ k: 'l11TapT', opp: true, l7mark: true }, { k: 'cdMay', cost: may[0].cost, ops: [{ k: 'l11StunLast' }] }];
+  }
+  if (/^look at the top three cards of your library\. put one of those cards into your hand and the rest on the bottom of your library in any order\. put each of those cards into your hand instead if there are three or more lesson cards in your graveyard$/.test(s)) return [{ k: 'l11Accum', n: 3, lessons: 3 }];
+  if (/^return target nonland permanent to its owner's hand\. if you controlled that permanent, draw a card$/.test(s)) { const b = pe("return target nonland permanent to its owner's hand"); if (b.length !== 1) return null; return [Object.assign({}, b[0], { l7mark: true }), { k: 'draw', n: 1, cnd: { k: 'l11tgtMine', text: 'you controlled that permanent' } }]; }
+  if (/^put a \+1\/\+1 counter on (?:her|him|them)$/.test(s)) return [{ k: 'selfCounters', n: 1 }];
+  if (/^the owner of target creature or enchantment puts it into their library second from the top or on the bottom\. you create a clue token$/.test(s)) return [{ k: 'l11LostDays' }, { k: 'avClue', n: 1 }];
+  if (/^tap ~$/.test(s)) return [{ k: 'l11TapSelf' }];
+  if (/^tap up to one target creature\. it doesn't untap during its controller's untap step for as long as you control ~$/.test(s)) return [{ k: 'l11TyLee' }];
+  if (/^enchanted creature's owner shuffles it into their library$/.test(s)) return [{ k: 'l11ShuffleEnch' }];
+  if ((m = s.match(/^~ has base power and toughness (\d+)\/(\d+) until end of turn$/))) return [{ k: 'l11Base', p: +m[1], t: +m[2] }];
+  if ((m = s.match(/^until end of turn, ~ has base power (\d+) and gains ([a-z ]+)$/))) { const kws = kwList(m[2]); if (kws.join(' and ') !== m[2]) return null; return [{ k: 'l11Base', p: +m[1], kws }]; }
+  if (/^it deals 1 damage to you\. create a clue token$/.test(s)) return [{ k: 'l11DmgYou', n: 1 }, { k: 'avClue', n: 1 }];
+  if ((m = s.match(/^exile target creature with mana value (\d+) or greater$/))) return [{ k: 'l11ExileMv', min: +m[1] }];
+  if (/^if you attacked this turn, create a clue token$/.test(s)) return [{ k: 'avClue', n: 1, cnd: { k: 'l11attacked', text: 'you attacked this turn' } }];
+  if ((m = s.match(/^~ deals (\d+) damage to target creature\. if this spell was kicked, it deals (\d+) damage to that creature instead$/))) return [{ k: 'dmg', n: +m[1], f: 'creature', l11kick: +m[2] }];
+  if (/^return target creature card from your graveyard to your hand\. if this spell was kicked, instead put that card onto the battlefield tapped$/.test(s)) return [{ k: 'l11Zuko' }];
+  if ((m = s.match(/^creatures target player controls get \+(\d+)\/\+(\d+) until end of turn$/))) return [{ k: 'l11PumpPlayer', p: +m[1], t: +m[2] }];
+  if (/^target creature can't block this turn\. if this spell was kicked, gain control of that creature until end of turn, untap it, and it gains haste until end of turn$/.test(s)) return [{ k: 'x26CantBlock', l7mark: true }, { k: 'l11ThreatenLast', cnd: kick }];
+  if (/^you may pay \{1\}\. when you do, target creature can't block this turn$/.test(s)) return [{ k: 'mayPay', generic: 1, pips: [], text: '{1}', ops: [{ k: 'x26CantBlock' }] }];
+  if (/^put a \+1\/\+1 counter on that creature and it gains haste until end of turn$/.test(s)) return [{ k: 'l11CtrEntered', kws: ['haste'] }];
+  if (/^up to two target creatures you control each deal damage equal to their power to target creature an opponent controls$/.test(s)) return [{ k: 'l11Allies', n: 2 }];
+  if (/^put a quest counter on ~\. when you do, if it has four or more quest counters on it, put a \+1\/\+1 counter on target creature you control\. it gains trample until end of turn$/.test(s))
+    return [{ k: 'fxSelfCtr', kind: 'quest' }, { k: 'counterT', n: 1, f: 'creature you control', kw: 'trample', cnd: { k: 'srcCtr', n: 4, kind: 'quest', text: 'it has four or more quest counters on it' } }];
+  if (/^mill three cards\. you may put a land card from among them into your hand\. if you don't, put a \+1\/\+1 counter on ~$/.test(s)) return [{ k: 'l11Ostrich', n: 3 }];
+  if ((m = s.match(/^look at the top x cards of your library, where x is (.+?)\. you may reveal a creature or land card from among them and put it into your hand\. put the rest on the bottom of your library in a random order$/))) {
+    const sp = l9CountSpec(m[1]); const d = pe('look at the top five cards of your library. you may reveal a creature or land card from among them and put it into your hand. put the rest on the bottom of your library in a random order');
+    if (!sp || d.length !== 1) return null; return [Object.assign({}, d[0], { l11cnt: sp })];
+  }
+  if (/^you may search your library for a basic land card and put it onto the battlefield tapped\. if you search your library this way, put ~ on the bottom of its owner's library, then shuffle$/.test(s)) return [{ k: 'l11Cabbage' }];
+  if (/^untap target artifact or creature$/.test(s)) return [{ k: 'l11UntapAC' }];
+  if ((m = s.match(/^put a \+1\/\+1 counter on each other ([a-z]+) creature you control$/))) return [{ k: 'l11CtrEachOther', sub: m[1] }];
+  if (/^create a 2\/1 colorless construct artifact creature token with flying named ballistic boulder that's tapped and attacking\. sacrifice that token at the beginning of the next end step$/.test(s)) return [{ k: 'l11Boulder' }];
+  if (/^destroy target permanent unless its controller has ~ deal damage to them equal to his power$/.test(s)) return [{ k: 'l11Combustion' }];
+  if (/^another target ally you control gains indestructible until end of turn$/.test(s)) return [{ k: 'pumpT', p: 0, t: 0, kws: ['indestructible'], f: 'ally you control', l8other: true }];
+  if (/^untap another target permanent you control$/.test(s)) return [{ k: 'l11UntapMine' }];
+  if (/^mill a card\. you may put a land card milled this way into your hand\. you gain 2 life if a lesson card is milled this way$/.test(s)) return [{ k: 'l11Dummy' }];
+  if ((m = s.match(/^target creature you control gains firebending (\d+) until end of turn$/))) return [{ k: 'l11FireT', n: +m[1] }];
+  if (/^create a 1\/1 colorless spirit creature token with "(?:~|this token) can't block or be blocked by non-spirit creatures\.?"$/.test(s)) return [{ k: 'l11SpiritTok' }];
+  if (/^two target creatures you control that share a creature type can't be blocked this turn$/.test(s)) return [{ k: 'l11Tunnel' }];
+  if (/^you may tap it\. when you do, destroy target creature with power 4 or less$/.test(s)) return [{ k: 'l11DrillTap' }];
+  if (/^target creature you control with a \+1\/\+1 counter on it gains ([a-z ]+) until end of turn$/.test(s)) { const kws = kwList(s.match(/gains ([a-z ]+) until/)[1]); return kws.length ? [{ k: 'l11KwP1', kws }] : null; }
+  if (/^remove up to three counters from target creature$/.test(s)) return [{ k: 'l11RmUpTo', n: 3 }];
+  if (/^exile up to one target card from a graveyard\. if a creature card is exiled this way, create a clue token$/.test(s)) return [{ k: 'l11ExileGy' }];
+  if (/^put x \+1\/\+1 counters on target attacking creature, where x is the number of permanents you've sacrificed this turn\. if x is three or more, that creature gains lifelink until end of turn$/.test(s)) return [{ k: 'l11Pursuit' }];
+  if (/^take an extra turn after this one$/.test(s)) return [{ k: 'extraTurn' }];
+  if ((m = s.match(/^put an? (double strike|first strike) counter on ~$/))) return [{ k: 'l11CtrSelf', kind: m[1] }];
+  return null;
+}
+{ const _pe = parseEffects; parseEffects = function (s) { const r = typeof s === 'string' ? l11Sentence(s.trim().replace(/\.$/, ''), _pe) : null; return r || _pe(s); }; }
+
+/* ---------- choices made by another player ---------- */
+CHGEN.l11LostDays = function* (s, op, ctx) {
+  const c = G.cards[op.id]; if (!c || c.zone !== 'bf') return; const o = c.owner; const title = chTitle(ctx, 'Lost Days');
+  const i = yield { t: 'ask', o, labels: ['Segunda desde arriba', 'Al fondo de la biblioteca'], title: `${title}: ¿dónde pones ${cn(c)}?`, ai: () => (c.ctl === o ? 0 : 1) };
+  if (+i === 0) l9ToLib(c, 2); else { moveCard(c, 'lib', { pos: 'bottom' }); log(`${cn(c)} se pone en el fondo de la biblioteca de ${pn(o)}.`); }
+};
+CHWHO.l11LostDays = (s, op) => { const c = G.cards[op.id]; return c && c.zone === 'bf' ? [c.owner] : []; };
+CHGEN.l11Combustion = function* (s, op, ctx) {
+  const c = G.cards[op.id], src = G.cards[op.src]; if (!c || c.zone !== 'bf') return; const o = c.ctl; const n = src ? Math.max(0, P(src)) : 0; const title = chTitle(ctx, 'Combustion Man');
+  const i = n > 0 ? yield { t: 'ask', o, labels: [`Recibir ${n} de daño`, `Dejar que se destruya ${cn(c)}`], title: `${title}: elige`, ai: () => (G.p[o].life > n + 5 && value(c) >= 3 ? 0 : 1) } : 1;
+  if (+i === 0) { damagePlayer(o, n, src); log(`${pn(o)} recibe ${n} de daño de ${src ? cn(src) : 'Combustion Man'} para salvar ${cn(c)}.`, 'bad'); } else { log(`${cn(c)} se destruye (${esc(title)}).`, 'bad'); destroy(c); }
+};
+CHWHO.l11Combustion = (s, op) => { const c = G.cards[op.id]; return c && c.zone === 'bf' ? [c.ctl] : []; };
+
+/* ---------- targets ---------- */
+const l11Ok = (c, s, f) => !!(c && c.zone === 'bf' && matchFilter(c, f, s, false));
+EOE_TGT.l11BlinkMine = { valid: (op, ctx, x) => l11Ok(x && x.card, ctx.seat, 'creature you control'), target: (op, ctx) => bestBy(permsOf(ctx.seat).filter(c => isCreature(c) && !c.token && AB(c).etb.length), c => AB(c).etb.length * 3 + value(c) * 0.1) || null };
+EOE_TGT.l11Razor = { valid: (op, ctx, x) => { const c = x && x.card; return l11Ok(c, ctx.seat, 'creature') && (c.atk != null || c.blocking != null); }, target: (op, ctx) => bestBy(permsAll().filter(c => c.ctl !== ctx.seat && l11Ok(c, ctx.seat, 'creature') && (c.atk != null || c.blocking != null)), c => value(c)) || null };
+EOE_TGT.l11TapT = { valid: (op, ctx, x) => { const c = x && x.card; return l11Ok(c, ctx.seat, 'creature') && (!op.opp || c.ctl !== ctx.seat); }, target: (op, ctx) => bestBy(permsAll().filter(c => c.ctl !== ctx.seat && l11Ok(c, ctx.seat, 'creature')), c => value(c) + (!c.tapped ? 2 : 0)) || null };
+EOE_TGT.l11TyLee = EOE_TGT.l11TapT;
+EOE_TGT.l11ExileMv = { valid: (op, ctx, x) => { const c = x && x.card; return l11Ok(c, ctx.seat, 'creature') && (D(c).cmc || 0) >= op.min; }, target: (op, ctx) => bestBy(permsAll().filter(c => c.ctl !== ctx.seat && l11Ok(c, ctx.seat, 'creature') && (D(c).cmc || 0) >= op.min), c => value(c)) || null };
+EOE_TGT.l11LostDays = { valid: (op, ctx, x) => { const c = x && x.card; return !!(c && c.zone === 'bf' && (isCreature(c) || isType(c, 'enchantment')) && matchFilter(c, 'permanent', ctx.seat, false)); }, target: (op, ctx) => bestBy(permsAll().filter(c => c.ctl !== ctx.seat && (isCreature(c) || isType(c, 'enchantment')) && matchFilter(c, 'permanent', ctx.seat, false)), c => value(c)) || null };
+EOE_TGT.l11UntapAC = { valid: (op, ctx, x) => { const c = x && x.card; return !!(c && c.zone === 'bf' && (isCreature(c) || isType(c, 'artifact')) && matchFilter(c, 'permanent', ctx.seat, false)); }, target: (op, ctx) => bestBy(permsOf(ctx.seat).filter(c => c.tapped && (isCreature(c) || isType(c, 'artifact')) && (!ctx.src || c.id !== ctx.src.id)), c => value(c)) || null };
+EOE_TGT.l11UntapMine = { valid: (op, ctx, x) => { const c = x && x.card; return !!(c && c.zone === 'bf' && c.ctl === ctx.seat && (!ctx.src || c.id !== ctx.src.id)); }, target: (op, ctx) => bestBy(permsOf(ctx.seat).filter(c => c.tapped && (!ctx.src || c.id !== ctx.src.id)), c => (isCreature(c) ? value(c) : 1) + (manaOf(c) ? 1 : 0)) || null };
+EOE_TGT.l11FireT = { valid: (op, ctx, x) => l11Ok(x && x.card, ctx.seat, 'creature you control'), target: (op, ctx) => bestBy(permsOf(ctx.seat).filter(c => isCreature(c) && !c.tapped), c => P(c)) || null };
+EOE_TGT.l11KwP1 = { valid: (op, ctx, x) => { const c = x && x.card; return l11Ok(c, ctx.seat, 'creature you control') && (c.cnt.p1 || 0) > 0; }, target: (op, ctx) => bestBy(permsOf(ctx.seat).filter(c => isCreature(c) && (c.cnt.p1 || 0) > 0), c => P(c)) || null };
+EOE_TGT.l11Pursuit = { valid: (op, ctx, x) => { const c = x && x.card; return l11Ok(c, ctx.seat, 'creature') && c.atk != null; }, target: (op, ctx) => bestBy(permsOf(ctx.seat).filter(c => isCreature(c) && c.atk != null), c => P(c)) || null };
+EOE_TGT.l11Combustion = { valid: (op, ctx, x) => { const c = x && x.card; return !!(c && c.zone === 'bf' && matchFilter(c, 'permanent', ctx.seat, false)); }, target: (op, ctx) => bestBy(permsAll().filter(c => c.ctl !== ctx.seat && matchFilter(c, 'permanent', ctx.seat, false)), c => value(c) + (isCreature(c) ? 1 : 0)) || null };
+
+/* ---------- ops ---------- */
+function l11DiscardPick(s, list) { return bestBy(list, c => -value(c) + (isLand(c) && permsOf(s).filter(isLand).length >= 5 ? 3 : 0)); }
+const l11Spirit = s => { if (tokenCap(s)) return null; return makeToken(s, { name: 'Spirit', p: 1, t: 1, colors: [], uniq: 'nospirit', text: "This token can't block or be blocked by non-Spirit creatures." }); };
+function l11Mill(s, n) { const out = []; for (let i = 0; i < n && G.p[s].lib.length; i++) { const c = G.cards[G.p[s].lib[0]]; moveCard(c, 'gy'); out.push(c); } if (out.length) log(`${pn(s)} muele ${out.map(cn).join(', ')}.`); return out; }
+Object.assign(XOPS, {
+  l11ExhMark(op, ctx) { const c = l11Src(ctx); if (c) c.l11Exh = true; },
+  l11CtrSelf(op, ctx) { const c = l11Src(ctx); if (!c || c.zone !== 'bf') return; c.cnt[op.kind] = (c.cnt[op.kind] || 0) + 1; recomputeMods(); log(`${cn(c)} recibe un contador de ${KW_ES[op.kind] || op.kind}.`); },
+  l11PumpCre(op, ctx) { const c = G.cards[op.id]; if (!c || c.zone !== 'bf') return; const n = permsOf(ctx.seat).filter(isCreature).length; c.tp += n; c.tt += n; log(`${cn(c)} ataca sola y obtiene +${n}/+${n} hasta el final del turno.`); },
+  l11Teo(op, ctx) { const s = ctx.seat; drawCards(s, 1); const c = l11DiscardPick(s, G.p[s].hand.map(id => G.cards[id])); if (!c) return; moveCard(c, 'gy'); log(`${pn(s)} descarta ${cn(c)}.`); if (!isLand(c)) trigger(l11Src(ctx), [{ k: 'counterT', n: 1, f: 'creature you control' }]); },
+  l11PutCtrs(op, ctx) { const x = l11Src(ctx); if (!x || x.zone !== 'bf') return; for (const [k, v] of op.list) addCounters(x, v, k, true); log(`${cn(x)} recibe sus contadores: ${op.list.map(([k, v]) => v + ' ' + ctrName(k)).join(', ')}.`); },
+  l11MayGain(op, ctx) { const x = l11Src(ctx); if (x && !x26TurnOnce(x, 'l11ekg')) return; gainLife(ctx.seat, op.n); log(`${pn(ctx.seat)} gana ${op.n} vidas.`); },
+  l11BlinkMine(op, ctx, t) { if (!t || t.zone !== 'bf') return; const o = t.owner; moveCard(t, 'exile'); if (t.zone !== 'exile') return; moveCard(t, 'bf', { ctl: o }); log(`${cn(t)} se exilia y vuelve al campo.`); },
+  l11Fancy(op, ctx) { for (const c of permsOf(ctx.seat).filter(isCreature).sort((a, b) => (b.tapped - a.tapped) || value(b) - value(a)).slice(0, op.n)) { c.tapped = false; c.tp += op.p; c.tt += op.t; log(`${cn(c)} se endereza y obtiene +${op.p}/+${op.t}.`); } },
+  l11Razor(op, ctx, t) { if (!t || t.zone !== 'bf') return; const lethal = Math.max(0, toughLeft(t)); dealDamage(t, op.n, l11Src(ctx)); const ex = Math.max(0, op.n - lethal); log(`${cn(t)} recibe ${op.n} de daño${ex ? ` (${ex} de exceso)` : ''}.`, 'bad'); if (ex) { gainLife(ctx.seat, ex); log(`${pn(ctx.seat)} gana ${ex} vidas.`); } },
+  l11Second(op, ctx) { const x = l11Src(ctx); if (!x) return; if (fxCount(x, 'l11second') === 2) drawCards(ctx.seat, 1); },
+  l11CtrEach(op, ctx) { const n = l9Count(op.cnt, ctx.seat); if (!n) return; for (const c of permsOf(ctx.seat).filter(isCreature)) addCounters(c, n, 'p1', true); log(`Las criaturas de ${pn(ctx.seat)} reciben ${n} contadores +1/+1.`); },
+  l11Drain(op, ctx) { const n = l9Count(op.cnt, ctx.seat); if (!n) return; let tot = 0; for (const o of oppsOf(ctx.seat).filter(alive)) { loseLife(o, n); tot += n; } gainLife(ctx.seat, n); log(`Cada oponente pierde ${n} vidas y ${pn(ctx.seat)} gana ${n}.`); void tot; },
+  l11TapT(op, ctx, t) { if (!t || t.zone !== 'bf') return; ctx.lastTgt = t.id; if (!t.tapped) { tapPerm(t); log(`${cn(t)} se gira.`); } },
+  l11StunLast(op, ctx) { const c = l11Last(ctx); if (!c || c.zone !== 'bf') return; c.cnt.stun = (c.cnt.stun || 0) + 1; log(`${cn(c)} recibe un contador de aturdimiento.`); },
+  l11Accum(op, ctx) { const s = ctx.seat; const top = G.p[s].lib.slice(0, op.n).map(id => G.cards[id]); if (!top.length) return; const all = l11Lessons(s) >= op.lessons; const keep = all ? top : [bestBy(top, c => value(c) + (isLand(c) && permsOf(s).filter(isLand).length < 5 ? 4 : 0))]; for (const c of keep) moveCard(c, 'hand'); for (const c of top.filter(c => !keep.includes(c))) moveCard(c, 'lib', { pos: 'bottom' }); log(`${pn(s)} mira las ${top.length} primeras cartas y se queda ${all ? 'todas' : 'una'}.`); },
+  l11LostDays(op, ctx, t) { if (!t || t.zone !== 'bf') return; chGo('l11LostDays', ctx.seat, { id: t.id }, ctx); },
+  l11TapSelf(op, ctx) { const c = l11Src(ctx); if (c && c.zone === 'bf' && !c.tapped) { tapPerm(c); log(`${cn(c)} se gira.`); } },
+  l11TyLee(op, ctx, t) { const src = l11Src(ctx); if (!t || t.zone !== 'bf' || !src) return; if (!t.tapped) tapPerm(t); t.l11While = { src: src.id, ctl: ctx.seat, noUntap: true }; recomputeMods(); log(`${cn(t)} se gira y no se endereza mientras ${pn(ctx.seat)} controle ${cn(src)}.`); },
+  l11ShuffleEnch(op, ctx) { const a = l11Src(ctx); const c = a && a.att != null ? G.cards[a.att] : null; if (!c || c.zone !== 'bf') return; const o = c.owner; moveCard(c, 'lib'); if (c.zone === 'lib') { shuffle(G.p[o].lib); log(`${pn(o)} baraja ${cn(c)} en su biblioteca.`); } },
+  l11Base(op, ctx) { const c = l11Src(ctx); if (!c || c.zone !== 'bf') return; c.tbase = [op.p, op.t != null ? op.t : basePT(D(c).toughness)]; c.tbaseT = G.turnsTaken; if (op.kws) c.tkw.push(...op.kws); log(`${cn(c)} tiene fuerza y resistencia base ${c.tbase[0]}/${c.tbase[1]} hasta el final del turno${op.kws ? ' y gana ' + op.kws.map(k => KW_ES[k] || k).join(' y ') : ''}.`); },
+  l11DmgYou(op, ctx) { const src = l11Src(ctx); damagePlayer(ctx.seat, op.n, src); log(`${src ? cn(src) : ''} hace ${op.n} de daño a ${pn(ctx.seat)}.`, 'bad'); },
+  l11ExileMv(op, ctx, t) { if (!t || t.zone !== 'bf' || (D(t).cmc || 0) < op.min) return; moveCard(t, 'exile'); log(`${cn(t)} se exilia.`, 'bad'); },
+  l11Zuko(op, ctx) { const s = ctx.seat; const c = bestBy(G.p[s].gy.map(id => G.cards[id]).filter(c => /\bcreature\b/i.test(D(c).type_line || '')), c => value(c)); if (c) l11ZukoDo(s, c, ctx.kicked); },
+  l11PumpPlayer(op, ctx) { l11PumpPlayerDo(ctx.seat, op); },
+  l11ThreatenLast(op, ctx) { const c = l11Last(ctx); if (c && c.zone === 'bf') XOPS.x26TempCtl({}, ctx, c); },
+  l11CtrEntered(op, ctx) { const c = ctx.entered && G.cards[ctx.entered.id]; if (!c || c.zone !== 'bf') return; addCounters(c, 1, 'p1', true); if (op.kws) c.tkw.push(...op.kws); log(`${cn(c)} recibe un contador +1/+1 y gana prisa hasta el final del turno.`); },
+  l11Allies(op, ctx) { const s = ctx.seat; const mine = permsOf(s).filter(isCreature).sort((a, b) => P(b) - P(a)).slice(0, op.n); const pw = mine.reduce((q, c) => q + Math.max(0, P(c)), 0); const t = bestBy(permsAll().filter(c => c.ctl !== s && l11Ok(c, s, 'creature')), c => (toughLeft(c) <= pw ? 10 : 0) + value(c)); if (t) l11AlliesDo(mine, t); },
+  l11Ostrich(op, ctx) { const s = ctx.seat; const src = l11Src(ctx); const milled = l11Mill(s, op.n); const land = milled.find(c => isLand(c) && c.zone === 'gy'); if (land) { moveCard(land, 'hand'); log(`${cn(land)} vuelve a la mano de ${pn(s)}.`); } else if (src && src.zone === 'bf') { addCounters(src, 1, 'p1', true); log(`${cn(src)} recibe un contador +1/+1.`); } },
+  l11Cabbage(op, ctx) { const s = ctx.seat; const src = l11Src(ctx); if (!G.p[s].lib.some(id => isLand(G.cards[id]) && /\bbasic\b/i.test(D(G.cards[id]).type_line || ''))) return; applyOp({ k: 'ramp', n: 1, types: ['land'], basic: true, what: 'basic', dest: 'bf', tapped: true }, ctx, null); if (src && src.zone === 'bf') { moveCard(src, 'lib', { pos: 'bottom' }); shuffle(G.p[src.owner].lib); log(`${cn(src)} se baraja en la biblioteca de su dueño.`); } },
+  l11UntapAC(op, ctx, t) { if (t && t.zone === 'bf' && t.tapped) { t.tapped = false; log(`${cn(t)} se endereza.`); } },
+  l11UntapMine(op, ctx, t) { if (t && t.zone === 'bf' && t.tapped) { t.tapped = false; log(`${cn(t)} se endereza.`); } },
+  l11CtrEachOther(op, ctx) { const src = l11Src(ctx); const list = permsOf(ctx.seat).filter(c => isCreature(c) && (!src || c.id !== src.id) && fxIs(c, [op.sub])); for (const c of list) addCounters(c, 1, 'p1', true); if (list.length) log(`${list.map(cn).join(', ')} reciben un contador +1/+1.`); },
+  l11Boulder(op, ctx) { const s = ctx.seat; if (tokenCap(s)) return; const tally = {}; for (const c of permsOf(s)) if (c.atk != null) tally[c.atk] = (tally[c.atk] || 0) + 1; const to = Object.keys(tally).sort((a, b) => tally[b] - tally[a])[0]; const tk = makeToken(s, { name: 'Ballistic Boulder', p: 2, t: 1, colors: [], kws: ['flying'], tapped: true, type: 'Token Artifact Creature — Construct' }); tk.fxSacEnd = G.turnsTaken; if (to != null && alive(+to)) (G.fxAddAtk ||= []).push({ id: tk.id, to: +to }); log(`${pn(s)} crea ${cn(tk)} 2/1 con vuelo, girada${to != null ? ' y atacando a ' + pn(+to) : ''}; se sacrificará al final del turno.`); },
+  l11Combustion(op, ctx, t) { if (!t || t.zone !== 'bf') return; const src = l11Src(ctx); chGo('l11Combustion', ctx.seat, { id: t.id, src: src ? src.id : null }, ctx); },
+  l11UntapMineX(op, ctx, t) { XOPS.l11UntapMine(op, ctx, t); },
+  l11Dummy(op, ctx) { const s = ctx.seat; const m = l11Mill(s, 1); const c = m[0]; if (!c) return; if (isLand(c) && c.zone === 'gy') { moveCard(c, 'hand'); log(`${cn(c)} vuelve a la mano de ${pn(s)}.`); } if (/\blesson\b/i.test(D(c).type_line || '')) { gainLife(s, 2); log(`${pn(s)} gana 2 vidas (Lección molida).`); } },
+  l11FireT(op, ctx, t) { if (!t || t.zone !== 'bf') return; t.avFireT = { n: Math.max(op.n, (t.avFireT && t.avFireT.turn === G.turnsTaken) ? t.avFireT.n : 0), turn: G.turnsTaken }; log(`${cn(t)} gana firebending ${op.n} hasta el final del turno.`); },
+  l11SpiritTok(op, ctx) { const tk = l11Spirit(ctx.seat); if (tk) log(`${pn(ctx.seat)} crea un Espíritu 1/1 incoloro (solo bloquea y es bloqueado por Espíritus).`); },
+  l11Tunnel(op, ctx) { const s = ctx.seat; const list = permsOf(s).filter(isCreature); let best = null; for (const a of list) for (const b of list) if (a.id < b.id && shareType(a, b)) { const v = P(a) + P(b); if (!best || v > best[2]) best = [a, b, v]; } if (best) for (const c of best.slice(0, 2)) { c.l11UnblT = G.turnsTaken; log(`${cn(c)} no puede ser bloqueada este turno.`); } },
+  l11DrillTap(op, ctx) { const s = ctx.seat; const src = l11Src(ctx); if (!src || src.zone !== 'bf' || src.tapped) return; const t = bestBy(permsAll().filter(c => c.ctl !== s && l11Ok(c, s, 'creature') && P(c) <= 4), c => value(c)); if (!t) return; tapPerm(src); log(`${pn(s)} gira ${cn(src)}.`); destroy(t); log(`${cn(t)} se destruye.`, 'bad'); },
+  l11KwP1(op, ctx, t) { if (!t || t.zone !== 'bf') return; t.tkw.push(...op.kws); log(`${cn(t)} gana ${op.kws.map(k => KW_ES[k] || k).join(' y ')} hasta el final del turno.`); },
+  l11RmUpTo(op, ctx, t) { if (!t) t = bestBy(permsAll().filter(c => c.ctl !== ctx.seat && l11Ok(c, ctx.seat, 'creature') && (c.cnt.p1 || 0) > 0), c => (c.cnt.p1 || 0) * 2 + value(c)); if (!t || t.zone !== 'bf') return; let left = op.n; const order = t.ctl === ctx.seat ? ['m1', 'stun'] : ['p1', 'indestructible', 'shield', 'flying', 'lifelink', 'deathtouch', 'trample', 'first strike', 'menace', 'vigilance', 'reach', 'hexproof']; for (const k of order) { while (left > 0 && (t.cnt[k] || 0) > 0) { t.cnt[k]--; left--; } } log(`Se quitan ${op.n - left} contadores de ${cn(t)}.`); },
+  l11ExileGy(op, ctx) { const s = ctx.seat; const c = bestBy(oppsOf(s).flatMap(o => G.p[o].gy.map(id => G.cards[id])), c => (/\bcreature\b/i.test(D(c).type_line || '') ? 5 : 0) + value(c)); if (c) l11ExileGyDo(s, c); },
+  l11Pursuit(op, ctx, t) { if (!t || t.zone !== 'bf') return; const p = G.p[ctx.seat]; const n = p.l11SacT === G.turnsTaken ? (p.l11SacN || 0) : 0; if (n) addCounters(t, n, 'p1', true); if (n >= 3) t.tkw.push('lifelink'); log(`${cn(t)} recibe ${n} contadores +1/+1${n >= 3 ? ' y gana vínculo vital' : ''}.`); }
+});
+function l11ZukoDo(s, c, kicked) { if (!c || c.zone !== 'gy') return; if (kicked) { moveCard(c, 'bf', { ctl: s, tapped: true }); log(`${cn(c)} vuelve al campo girada.`, 'good'); } else { moveCard(c, 'hand'); log(`${cn(c)} vuelve a la mano de ${pn(s)}.`); } }
+function l11PumpPlayerDo(o, op) { const list = permsOf(o).filter(isCreature); for (const c of list) { c.tp += op.p; c.tt += op.t; } log(`Las criaturas de ${pn(o)} obtienen +${op.p}/+${op.t} hasta el final del turno.`); }
+function l11AlliesDo(mine, t) { for (const c of mine) { if (!t || t.zone !== 'bf') break; const n = Math.max(0, P(c)); if (n) { dealDamage(t, n, c); log(`${cn(c)} hace ${n} de daño a ${cn(t)}.`, 'bad'); } } }
+function l11ExileGyDo(s, c) { if (!c || c.zone !== 'gy') return; const cre = /\bcreature\b/i.test(D(c).type_line || ''); moveCard(c, 'exile'); log(`${cn(c)} se exilia del cementerio.`); if (cre) applyOp({ k: 'avClue', n: 1 }, { seat: s }, null); }
+Object.assign(XPROMPT, {
+  async l11Teo(op, pr) { const s = pr.ctx.seat; drawCards(s, 1); render(); let c = null; for (let k = 0; !c && k < 40 && G.p[s].hand.length; k++) c = __R(ME, G, await pickFromList(G.p[s].hand.map(id => G.cards[id]), `${pr.title}: descarta una carta`)); if (!c) return; moveCard(c, 'gy'); log(`${pn(s)} descarta ${cn(c)}.`); if (!isLand(c)) { const n1 = UI.prompts.length; userOps([{ k: 'counterT', n: 1, f: 'creature you control' }], pr.ctx, pr.ctx.src); __R(ME, G, await resolveNewPrompts(n1)); } },
+  async l11MayGain(op, pr) { const x = l11Src(pr.ctx); if (x && (x.x26u || {})['l11ekg@' + G.turnsTaken]) return; if (!__R(ME, G, await askYesNo(pr.title, `¿Ganar ${op.n} vidas? (solo una vez por turno)`))) return; XOPS.l11MayGain(op, pr.ctx); },
+  async l11Fancy(op, pr) { const got = __R(ME, G, await l10PickMany(pr, {}, op.n, 'criatura')); for (const c of got) { c.tapped = false; c.tp += op.p; c.tt += op.t; log(`${cn(c)} se endereza y obtiene +${op.p}/+${op.t}.`); } },
+  async l11Accum(op, pr) { const s = pr.ctx.seat; const top = G.p[s].lib.slice(0, op.n).map(id => G.cards[id]); if (!top.length) return; if (l11Lessons(s) >= op.lessons) { for (const c of top) moveCard(c, 'hand'); log(`${pn(s)} se queda las ${top.length} cartas (3 o más Lecciones).`); return; } let c = null; for (let k = 0; !c && k < 40; k++) c = __R(ME, G, await pickFromList(top, `${pr.title}: elige la carta que te quedas`)); c = c || top[0]; moveCard(c, 'hand'); for (const r of top.filter(x => x !== c)) moveCard(r, 'lib', { pos: 'bottom' }); log(`${pn(s)} se queda una carta y pone el resto en el fondo.`); },
+  async l11Zuko(op, pr) { const s = pr.ctx.seat; const list = G.p[s].gy.map(id => G.cards[id]).filter(c => /\bcreature\b/i.test(D(c).type_line || '')); if (!list.length) return; let c = null; for (let k = 0; !c && k < 40; k++) c = __R(ME, G, await pickFromList(list, `${pr.title}: elige la criatura de tu cementerio`)); l11ZukoDo(s, c || list[0], pr.ctx.kicked); },
+  async l11PumpPlayer(op, pr) { const seats = aliveSeats(); const i = __R(ME, G, await askChoice(`${pr.title}: elige el jugador objetivo`, seats.map(pn))); l11PumpPlayerDo(seats[i != null && +i >= 0 ? +i : seats.indexOf(pr.ctx.seat)], op); },
+  async l11Allies(op, pr) { const s = pr.ctx.seat; const t = __R(ME, G, await l10PickMany(pr, {}, 1, 'criatura de un oponente que recibe el daño')); if (!t[0] || t[0].ctl === s) { if (t[0]) toast('Tiene que ser una criatura de un oponente.'); return; } const mine = __R(ME, G, await l10PickMany(pr, {}, op.n, 'criatura tuya que hace daño')); l11AlliesDo(mine.filter(c => c.ctl === s && isCreature(c)), t[0]); },
+  async l11Ostrich(op, pr) { const s = pr.ctx.seat; const src = l11Src(pr.ctx); const milled = l11Mill(s, op.n); const lands = milled.filter(c => isLand(c) && c.zone === 'gy'); const c = lands.length ? __R(ME, G, await pickFromList(lands, `${pr.title}: puedes poner una tierra en tu mano (Cancelar = contador +1/+1)`)) : null; if (c) { moveCard(c, 'hand'); log(`${cn(c)} vuelve a la mano de ${pn(s)}.`); } else if (src && src.zone === 'bf') { addCounters(src, 1, 'p1', true); log(`${cn(src)} recibe un contador +1/+1.`); } },
+  async l11Cabbage(op, pr) { if (!__R(ME, G, await askYesNo(pr.title, '¿Buscar una tierra básica girada? Si lo haces, esta criatura se baraja en tu biblioteca.'))) return; XOPS.l11Cabbage(op, pr.ctx); },
+  async l11Dummy(op, pr) { const s = pr.ctx.seat; const m = l11Mill(s, 1); const c = m[0]; if (!c) return; if (isLand(c) && c.zone === 'gy' && __R(ME, G, await askYesNo(pr.title, `¿Poner ${cn(c)} en tu mano?`))) { moveCard(c, 'hand'); log(`${cn(c)} vuelve a la mano de ${pn(s)}.`); } if (/\blesson\b/i.test(D(c).type_line || '')) { gainLife(s, 2); log(`${pn(s)} gana 2 vidas (Lección molida).`); } },
+  async l11Tunnel(op, pr) { const got = __R(ME, G, await l10PickMany(pr, {}, 2, 'criatura tuya')); const ok = got.length === 2 && got.every(c => c.ctl === pr.ctx.seat && isCreature(c)) && shareType(got[0], got[1]); if (!ok) { toast('Tienen que ser dos criaturas tuyas que compartan un tipo de criatura.'); return; } for (const c of got) { c.l11UnblT = G.turnsTaken; log(`${cn(c)} no puede ser bloqueada este turno.`); } },
+  async l11DrillTap(op, pr) { const s = pr.ctx.seat; const src = l11Src(pr.ctx); if (!src || src.zone !== 'bf' || src.tapped) return; if (!__R(ME, G, await askYesNo(pr.title, `¿Girar ${cn(src)} para destruir una criatura de fuerza 4 o menos?`))) return; tapPerm(src); const t = __R(ME, G, await l10PickMany(pr, {}, 1, 'criatura de fuerza 4 o menos')); if (t[0] && isCreature(t[0]) && P(t[0]) <= 4) { destroy(t[0]); log(`${cn(t[0])} se destruye.`, 'bad'); } void s; },
+  async l11RmUpTo(op, pr) { const t = __R(ME, G, await l10PickMany(pr, {}, 1, 'criatura')); const c = t[0]; if (!c) return; let left = op.n; while (left > 0) { const kinds = Object.keys(c.cnt).filter(k => (c.cnt[k] || 0) > 0 && k !== 'loy'); if (!kinds.length) break; const i = __R(ME, G, await askChoice(`${pr.title}: quita un contador (${op.n - left + 1} de hasta ${op.n})`, [...kinds.map(k => `${ctrName(k)} (${c.cnt[k]})`), 'Terminar'])); if (i == null || +i < 0 || +i >= kinds.length) break; c.cnt[kinds[+i]]--; left--; } log(`Se quitan ${op.n - left} contadores de ${cn(c)}.`); },
+  async l11ExileGy(op, pr) { const s = pr.ctx.seat; const list = aliveSeats().flatMap(o => G.p[o].gy.map(id => G.cards[id])); if (!list.length) return; const c = __R(ME, G, await pickFromList(list, `${pr.title}: elige hasta una carta de un cementerio (Cancelar = ninguna)`)); if (c) l11ExileGyDo(s, c); }
+});
+Object.assign(XTEXT, {
+  l11ExhMark: () => 'Agotamiento (solo una vez)', l11PumpCre: () => '+X/+X a la criatura que ataca sola', l11Teo: () => 'Roba y descarta; si descartas algo que no sea tierra, contador +1/+1', l11PutCtrs: () => 'Poner aquí sus contadores',
+  l11MayGain: o => `Puedes ganar ${o.n} vidas`, l11BlinkMine: () => 'Exiliar hasta una criatura tuya y devolverla', l11Fancy: o => `Enderezar una o dos criaturas y +${o.p}/+${o.t}`, l11Razor: o => `${o.n} de daño a una criatura atacante o bloqueadora; ganas el exceso`,
+  l11Second: () => 'Si es la segunda vez este turno, roba una carta', l11CtrEach: o => `X contadores +1/+1 en cada criatura tuya (X = ${o.cnt.join(' + ')})`, l11Drain: o => `Cada oponente pierde X y ganas X (X = ${o.cnt.join(' + ')})`,
+  l11TapT: () => 'Girar una criatura', l11StunLast: () => 'Contador de aturdimiento en esa criatura', l11Accum: () => 'Mirar 3 y quedarte una (las tres con 3+ Lecciones)', l11LostDays: () => 'Su dueño la pone segunda desde arriba o al fondo de su biblioteca',
+  l11TapSelf: () => 'Girarla', l11TyLee: () => 'Girar hasta una criatura; no se endereza mientras controles esta', l11ShuffleEnch: () => 'El dueño de la criatura encantada la baraja en su biblioteca', l11Base: o => `Base ${o.p}/${o.t != null ? o.t : '–'} hasta final de turno`,
+  l11DmgYou: o => `${o.n} de daño a ti`, l11ExileMv: o => `Exiliar una criatura de valor de maná ${o.min} o más`, l11Zuko: () => 'Devolver una criatura del cementerio a la mano (al campo girada si tuvo kicker)', l11PumpPlayer: o => `Las criaturas de un jugador obtienen +${o.p}/+${o.t}`,
+  l11ThreatenLast: () => 'Ganar el control de esa criatura hasta final de turno', l11CtrEntered: () => 'Contador +1/+1 y prisa a la criatura que entró', l11Allies: o => `Hasta ${o.n} criaturas tuyas hacen daño igual a su fuerza a una criatura rival`,
+  l11Ostrich: () => 'Moler 3; una tierra a la mano o un contador +1/+1', l11Cabbage: () => 'Puedes buscar una tierra básica girada y barajar esta criatura', l11UntapAC: () => 'Enderezar un artefacto o criatura', l11UntapMine: () => 'Enderezar otro permanente tuyo',
+  l11CtrEachOther: o => `Un contador +1/+1 en cada otro ${o.sub} tuyo`, l11Boulder: () => 'Roca 2/1 voladora atacando; se sacrifica al final del turno', l11Combustion: () => 'Destruir un permanente salvo que su controlador acepte el daño',
+  l11Dummy: () => 'Moler 1; si es tierra, a la mano; si es Lección, 2 vidas', l11FireT: o => `Firebending ${o.n} hasta final de turno`, l11SpiritTok: () => 'Espíritu 1/1 (solo bloquea y es bloqueado por Espíritus)', l11Tunnel: () => 'Dos criaturas tuyas que comparten tipo no pueden ser bloqueadas',
+  l11DrillTap: () => 'Puedes girarlo para destruir una criatura de fuerza 4 o menos', l11KwP1: o => `Una criatura tuya con contador +1/+1 gana ${o.kws.map(k => KW_ES[k] || k).join(' y ')}`, l11RmUpTo: o => `Quitar hasta ${o.n} contadores`,
+  l11ExileGy: () => 'Exiliar una carta de un cementerio; si es criatura, Pista', l11Pursuit: () => 'X contadores +1/+1 (permanentes sacrificados este turno); con 3+, vínculo vital'
+});
+
 </script>
 
 <script src="/config.js"></script>
