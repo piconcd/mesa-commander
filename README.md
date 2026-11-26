@@ -4,6 +4,8 @@
 
 Actualmente lo alojamos en una **Raspberry Pi 5 con Docker**. Se accede mediante una dirección HTTPS compartida por el administrador y una contraseña de invitación. **Es un proyecto experimental**: estamos probando y mejorando el multijugador, las reconexiones y la seguridad.
 
+> 📜 **¿Vas a cambiar algo?** Lee antes las [normas del proyecto](#-normas-del-proyecto). Lo que se sube a `main` se instala solo en el servidor y afecta a la partida de todos.
+
 ## ✨ Funcionalidades
 
 - **Hasta cuatro jugadores humanos** desde distintas casas, en una misma mesa. Los asientos libres pueden ocuparse con bots.
@@ -98,6 +100,62 @@ Las correcciones se probarán durante las partidas reales en la instalación hab
 
 No necesitas instalar Docker, Tailscale ni el juego en tu ordenador para jugar. Si el audio no conecta, puedes seguir jugando sin voz.
 
+## 📜 Normas del proyecto
+
+Estas normas son para todas las personas que colaboran. Son las mismas que sigue el asistente de IA del proyecto, que las tiene con más detalle técnico en [`CLAUDE.md`](CLAUDE.md). Si una norma de aquí y otra de `CLAUDE.md` parecen decir cosas distintas, avisa para corregirlo.
+
+### 1. Publicación y servidor
+
+1. **Una sola rama: `main`.** No se crean ramas, forks, versiones alternativas ni instalaciones paralelas del juego.
+2. **Un solo contenedor Docker: `mesa-commander`** (servicio `commander`). Las funciones nuevas van dentro de él; no se añaden contenedores ni servicios.
+3. **Todo lo que llega a `main` se instala solo en la Raspberry a las 07:00 (hora de Madrid)**, aunque haya partidas o gente en el chat de voz. Un error en `main` rompe la partida de todos, así que **nunca se sube nada a medias**.
+4. **No se toca la Raspberry ni su copia del proyecto.** GitHub es la única forma de hacer cambios.
+5. Se conservan el diseño, el chat de voz y el guardado de partidas, salvo que se pida cambiarlos expresamente.
+
+### 2. Antes de subir un cambio
+
+1. En GitHub Desktop, pulsa **«Fetch origin»** antes de empezar, para trabajar sobre la última versión.
+2. Cada cambio lleva **su prueba automática** en la carpeta `tests/`.
+3. Ejecuta las mismas comprobaciones que hace GitHub Actions. Las tres tienen que salir bien:
+
+   ```bash
+   npm run check
+   node --check server/voice.js
+   node --test tests/*.test.mjs
+   ```
+
+4. Si el cambio afecta al motor de reglas, pruébalo también jugando (por ejemplo, una partida de 4 bots).
+5. **Saltos de línea:** los archivos usan el formato de Windows (CRLF). No conviertas archivos enteros ni los reformatees. En la pestaña «Changes» de GitHub Desktop solo deben verse las líneas que has cambiado.
+6. Revisa en «Changes» que solo aparecen los archivos que esperas y escribe un resumen corto y claro en el commit.
+
+### 3. Lo que no se sube nunca
+
+- El archivo `.env`, contraseñas, claves privadas ni tokens. Usa `.env.example` solo para documentar variables, sin valores secretos.
+- Mazos privados, partidas guardadas ni datos personales.
+- Archivos de datos grandes, como el JSON de Oracle Cards de Scryfall. Los datos y los informes de trabajo se guardan **fuera** de la carpeta del repositorio.
+- Tampoco se comparte públicamente el enlace del juego ni su contraseña sin permiso del administrador.
+
+### 4. Cartas y reglas
+
+- Se usa siempre el **texto Oracle oficial** de cada carta (Scryfall), nunca una versión de memoria. Las reglas de referencia son las [Comprehensive Rules de Wizards](https://magic.wizards.com/en/rules).
+- **Objetivo:** que cada carta haga sola lo que dice su texto y que el juego **solo pregunte al jugador cuando las reglas le dejan elegir** (cuando la carta dice «puedes», «elige» u «objetivo»). Los bots deciden solos.
+- Primero se arreglan **mecánicas** (que corrigen muchas cartas a la vez) y después cartas sueltas.
+- **Nada de parches a medias.** Si una carta necesita reglas que el motor todavía no tiene (capas, efectos de reemplazo generales, copias complejas, cambios de tipo en cadena…), se deja marcada como pendiente y se explica por qué. Estas reglas están planificadas en [`docs/rules-engine-migration.md`](docs/rules-engine-migration.md) y [`docs/migration-status.md`](docs/migration-status.md).
+- No se publican porcentajes de «cartas que funcionan» sin una comprobación que se pueda verificar. Que la auditoría diga que una carta «funciona entera» solo significa que el intérprete no avisa de nada; no garantiza que la carta haga bien todo lo que dice.
+- El motor nuevo de `server/engine/` es experimental y **no se usa en las partidas**. No se conecta al juego salvo que el grupo lo decida.
+
+### 5. Para quien programe en el modo servidor
+
+- Las partidas reales las dirige un Chromium dentro del servidor, que ejecuta `app/index.html`. Lo que en la versión original solo podía pulsar el anfitrión **no lo puede pulsar nadie** en modo servidor. Por eso, las funciones nuevas deben estar al alcance de los jugadores: botones en su propia interfaz o mensajes `central-*` gestionados en `server/central.js`.
+- **Nunca se confía en lo que envía el navegador de un jugador** sin comprobarlo en el servidor (asiento, tipo de acción y estado de la partida).
+
+### 6. Si trabajas con el asistente de IA (Claude Code)
+
+- El asistente lee [`CLAUDE.md`](CLAUDE.md), responde en español y explica los cambios en lenguaje sencillo, diciendo qué hay que revisar.
+- **El asistente no hace commit ni push** salvo que se le pida expresamente en ese momento. La persona revisa los cambios y los sube con GitHub Desktop.
+- Al terminar, el asistente debe decir qué archivos aparecerán en «Changes» y proponer un resumen para el commit.
+- Se le puede dictar por voz: es normal que haya erratas o nombres de cartas escritos «de oído», y el asistente debe interpretarlos.
+
 ## 🤝 ¿Quieres colaborar?
 
 ¡Las propuestas de cambios, informes de errores y mejoras son bienvenidas! El código está en este repositorio público: **[piconcd/mesa-commander](https://github.com/piconcd/mesa-commander)**.
@@ -128,21 +186,9 @@ Puedes consultar el código públicamente. Para colaborar con permisos de escrit
 
 Para comunicar un fallo, abre una **Issue** con los pasos para reproducirlo, el comportamiento esperado y lo que ocurrió. Si afecta a la interfaz, añade una captura sin información privada.
 
-### Política obligatoria de actualizaciones y despliegue
+### Normas para colaborar
 
-- **Una única rama de publicación: `main`.** Todos los cambios se publican directamente en ella. No se mantienen ramas de desarrollo, versiones alternativas ni instalaciones paralelas de Mesa Commander.
-- **Un único contenedor Docker para Mesa Commander: `mesa-commander`**, correspondiente al servicio `commander` de Docker Compose. Todas las funciones del juego, el motor de reglas, el catálogo y el servidor se integran en el contenedor existente. No se crean contenedores nuevos ni instancias adicionales del juego.
-- **Actualización automática a las 07:00 (Europe/Madrid)**: se comprueba `origin/main` y, cuando hay cambios, se reconstruye y sustituye el contenedor existente, incluso si hay jugadores conectados, partidas activas o conversaciones de voz. No se aplaza el despliegue por actividad de los usuarios.
-- Se conserva el diseño de la aplicación, el chat de voz y la persistencia de datos, salvo cambios expresamente solicitados. Se mantienen las comprobaciones e intentos de restauración existentes si falla el despliegue.
-- La copia de producción en la Raspberry Pi no se edita directamente; GitHub es la fuente de los cambios. Las pruebas se realizan sin instalar una segunda versión de la aplicación en producción.
-
-### Reglas importantes para colaborar
-
-- **No subas contraseñas, claves privadas, tokens ni el archivo `.env`**. Usa `.env.example` únicamente para documentar variables sin secretos.
-- Evita subir mazos privados, datos personales y archivos de las partidas.
-- Publica todos los cambios directamente en `main`, respetando la política de un único contenedor y sin versiones paralelas.
-- Los cambios incorporados a `main` pueden terminar ejecutándose en la Raspberry: revisaremos especialmente los que afecten al servidor, Docker o scripts.
-- No compartas públicamente el enlace del juego ni su contraseña sin permiso del administrador.
+Antes de publicar, repasa las [normas del proyecto](#-normas-del-proyecto): una sola rama (`main`), un solo contenedor, actualización automática a las 07:00 aunque haya partidas, comprobaciones obligatorias y nada de secretos ni datos privados en el repositorio. Revisaremos con especial cuidado los cambios que afecten al servidor, a Docker o a los scripts, porque terminan ejecutándose en la Raspberry. Si falla un despliegue, se mantienen las comprobaciones e intentos de restauración que ya existen.
 
 ## 🛠️ Administración del servidor
 
