@@ -11,6 +11,7 @@
 
   if (engine) {
     const links = new Map();
+    let resettingGame = false;
     // The browser inside Docker is the authority; NONE of its four seats is
     // occupied by the server process itself.
     NET.gameSeats = function () {
@@ -121,8 +122,37 @@
       }
       netBroadcastLobby();
     }
+    // Reset the shared match, not the Docker service or imported decks.
+    async function centralResetGame(id) {
+      const link = links.get(id);
+      const seat = link && NET.peerOf(link);
+      if (!link || link.closed || seat == null || !NET.lobby[seat]?.online) {
+        return { ok: false, message: 'Solo un jugador conectado puede reiniciar la partida.' };
+      }
+      if (resettingGame || !NET.inGame || !G || TOUR) {
+        return { ok: false, message: 'No hay una partida de Commander que se pueda reiniciar.' };
+      }
+      const key = 'mpc.save', stampKey = 'mpc.t.' + key;
+      let t;
+      try {
+        // A newer tombstone prevents restoring an obsolete IndexedDB mirror.
+        t = Math.max(Date.now(), Number(localStorage.getItem(stampKey)) || 0) + 1;
+        localStorage.setItem(stampKey, String(t));
+        localStorage.removeItem(key);
+      } catch {
+        return { ok: false, message: 'No se ha podido eliminar la partida guardada.' };
+      }
+      resettingGame = true;
+      G.killed = true;
+      saveCheckpoint = () => {};
+      clearInterval(NET.tick);
+      clearInterval(NET.pump);
+      await idb.set('d:' + key, { t, v: null });
+      return { ok: true };
+    }
+    window.__centralResetGame = centralResetGame;
     window.__centralConnect = id => {
-      if (!window.__centralReady) return false;
+      if (!window.__centralReady || resettingGame) return false;
       const link = { open: true, id, closed: false,
         send(m) { if (!this.closed) window.__engineOutbound(id, m); },
         close() { if (!this.closed) window.__centralDisconnect(id); } };
@@ -130,7 +160,7 @@
     };
     window.__centralReceive = (id, m) => {
       const link = links.get(id);
-      if (!link || !m || typeof m !== 'object' || Array.isArray(m)) return;
+      if (resettingGame || !link || !m || typeof m !== 'object' || Array.isArray(m)) return;
       if (m.t === 'hello') { hello(link, m); return; }
       const k = NET.peerOf(link);
       if (k === undefined) return;
@@ -145,7 +175,7 @@
       const link = links.get(id);
       if (!link) return;
       links.delete(id); link.closed = true; link.open = false;
-      netHostGone(link);
+      if (!resettingGame) netHostGone(link);
     };
     window.__centralState = () => ({
       ready: !!window.__centralReady, inGame: !!NET.inGame,
@@ -191,8 +221,28 @@
   };
   const oldClientMsg = netClientMsg;
   netClientMsg = function (m) {
-    if (m.t === 'central-error') { toast(m.message || 'No se puede empezar.', true); return; }
+    if (m.t === 'central-error') { toast(esc(m.message || 'No se puede realizar la acción.'), true); return; }
+    if (m.t === 'end' && m.centralReset === true && NET.joinInfo) {
+      // The new lobby is ready. Use the normal reconnect path with this deck.
+      store.set('mpc.join', { ...NET.joinInfo, active: Date.now() });
+      sessionStorage.setItem('mpc.centralResetNotice', m.why || 'Partida reiniciada.');
+      clearTimeout(NET.retry);
+      const link = NET.link;
+      NET.link = null;
+      link?.close();
+      location.reload();
+      return;
+    }
     oldClientMsg(m);
+    if (m.t === 'welcome' && !m.started) {
+      const notice = sessionStorage.getItem('mpc.centralResetNotice');
+      if (notice) {
+        sessionStorage.removeItem('mpc.centralResetNotice');
+        NET.auto = false;
+        netOpenOnline();
+        toast(esc(notice));
+      }
+    }
     centralRenderStart();
   };
   const oldNetJoin = netJoin;
@@ -202,6 +252,8 @@
     if (!b) return;
     b.hidden = !(NET.mode === 'client' && NET.seat === 0 && (!NET.inGame || NET.meta?.over) && NET.link?.open);
     b.textContent = NET.inGame ? 'Nueva partida' : 'Empezar partida';
+    const reset = document.getElementById('central-reset');
+    if (reset) reset.hidden = !(NET.mode === 'client' && NET.inGame && !NET.tour && NET.link?.open && Number.isInteger(NET.seat));
   }
   function mount() {
     for (const b of document.querySelectorAll('.topbar [data-act="online"]')) b.hidden = true;
@@ -233,6 +285,17 @@
     start.textContent = 'Empezar partida'; start.hidden = true;
     start.onclick = () => NET.link?.send({ t: 'central-start' });
     bar.appendChild(start);
+    const reset = document.createElement('button');
+    reset.id = 'central-reset'; reset.className = 'btn';
+    reset.textContent = 'Reiniciar partida'; reset.hidden = true;
+    reset.title = 'Descartar la partida del servidor y volver a la sala todos los jugadores';
+    reset.onclick = () => {
+      if (!NET.inGame || !NET.link?.open || !Number.isInteger(NET.seat)) return;
+      if (window.confirm('¿Reiniciar la partida del servidor para todos? Se perderá el progreso actual y volveréis a la sala. Los mazos se conservarán.')) {
+        NET.link.send({ t: 'central-reset' });
+      }
+    };
+    bar.appendChild(reset);
     setInterval(() => { centralRenderStart(); enter.hidden = NET.mode === 'client' && NET.inGame; }, 600);
   }
   mount();

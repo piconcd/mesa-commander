@@ -81,6 +81,41 @@ let ctx, page;
 let ready = false;
 let lastState = null;
 let starting = false;
+let resetting = false;
+
+// Reload only the authoritative page and invalidate all old sessions.
+async function resetSharedGame(id) {
+  const session = sessions.get(id);
+  if (!session?.authenticated || !Number.isInteger(session.seat) || !ready || resetting) return;
+  resetting = true;
+  ready = false;
+  try {
+    const result = await page.evaluate(x => window.__centralResetGame(x), id);
+    if (!result?.ok) {
+      ready = true;
+      sendTo(id, { t: 'central-error', message: result?.message || 'No se puede reiniciar la partida.' });
+      return;
+    }
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => window.__centralReady === true, { timeout: 30000 });
+    const why = session.name + ' ha reiniciado la partida del servidor. Volviendo a la sala.';
+    for (const [peerId, ws] of connections) {
+      sendTo(peerId, { t: 'end', centralReset: true, why });
+      ws.close(1000, 'Game reset');
+    }
+    connections.clear();
+    sessions.clear();
+    voiceRoom.clear();
+    ready = true;
+    console.log('Shared game reset by', session.name);
+  } catch (e) {
+    console.error('Shared game reset failed', e);
+    // Avoid serving a half-reset game; Docker can recover the profile.
+    process.exit(1);
+  } finally {
+    resetting = false;
+  }
+}
 
 async function status() {
   if (!ready || !page || page.isClosed()) return { ready: false, activeGame: false, players: 0 };
@@ -149,6 +184,7 @@ wss.on('connection', async ws => {
     let m;
     try { m = JSON.parse(raw.toString()); }
     catch { return; }
+    if (!m || typeof m !== 'object' || Array.isArray(m)) return;
     if (!authenticated) {
       const proposed = typeof m.invitePassword === 'string' ? m.invitePassword : '';
       const a = Buffer.from(proposed), b = Buffer.from(INVITE_PASSWORD);
@@ -164,6 +200,8 @@ wss.on('connection', async ws => {
       delete m.invitePassword;
     }
     queue = queue.then(async () => {
+      if (!ready || !sessions.has(id)) return;
+      if (m.t === 'central-reset') { await resetSharedGame(id); return; }
       if (m.t?.startsWith?.('voice-')) { voiceMessage(id, m); return; }
       if (ready && !page.isClosed()) await page.evaluate(x => window.__centralReceive(x.id, x.m), { id, m });
     }).catch(e => console.error('Incoming event', e));

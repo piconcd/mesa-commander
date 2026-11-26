@@ -53,7 +53,8 @@ Las correcciones se probarán durante las partidas reales en la instalación hab
 1. Pide al administrador la **dirección HTTPS** de Mesa Commander y la **contraseña de invitación**.
 2. Abre el enlace desde un navegador actualizado, escribe tu nombre y entra a la mesa.
 3. Importa o selecciona tu mazo. El primer jugador conectado puede iniciar la partida cuando haya suficientes jugadores preparados (mínimo configurable entre 2 y 4).
-4. Si quieres hablar, pulsa **«Unirse a voz»**, concede permiso al micrófono y utiliza los controles para silenciarte o salir. Es opcional.
+4. Durante una partida de Commander, cualquier jugador conectado puede pulsar **«Reiniciar partida»** en la barra superior y confirmar. Se descarta el progreso de la mesa compartida y se abre una sala nueva; los jugadores vuelven a conectarse con su nombre y mazo seleccionado (si no lo hacen automáticamente, pueden entrar de nuevo). No se necesita reiniciar Docker. El chat de voz se desconecta y se puede volver a activar.
+5. Si quieres hablar, pulsa **«Unirse a voz»**, concede permiso al micrófono y utiliza los controles para silenciarte o salir. Es opcional.
 
 No necesitas instalar Docker, Tailscale ni el juego en tu ordenador para jugar. Si el audio no conecta, puedes seguir jugando sin voz.
 
