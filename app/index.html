@@ -1953,6 +1953,8 @@ function putZone(c, zone, pos) {
   if (zone === 'gy' && !c.token && G.bf.some(id => { const x = G.cards[id]; return x && x.id !== c.id && x.ctl !== c.owner && AB(x).dauthi; })) { zone = 'exile'; c.voidCtr = true; }
   if (zone === 'gy' && !c.token && /\bland\b/i.test(G.defs[c.n].type_line || '') && G.bf.some(id => { const x = G.cards[id]; return x && x.ctl === c.owner && AB(x).gitrog; })) { if (!G.gitPend) { G.gitPend = new Set(); setTimeout0(gitrogDraw); } G.gitPend.add(c.owner); }
   c.zone = zone;
+  // CR 903.9a: graveyard/exile choice is a state-based action, not a replacement.
+  c.mcCommandPending = !!(c.isCmd && (zone === 'gy' || zone === 'exile'));
   if (zone === 'bf') { G.bf.push(c.id); return; }
   const a = G.p[c.owner][zone];
   if (zone === 'lib') { if (pos === 'bottom') a.push(c.id); else a.unshift(c.id); } else a.push(c.id);
@@ -1984,8 +1986,8 @@ function moveCard(c, to, opts = {}) {
   if (!c) return;
   const from = c.zone;
   const intended = to;
-  if (c.isCmd && ['gy', 'exile', 'lib'].includes(to) && !opts.noRedirect && from !== 'cmdz') {
-    if (isBotSeat(c.owner) || SET.cmdToZone) to = 'cmdz';
+  if (c.isCmd && ['hand', 'lib'].includes(to) && !opts.noRedirect && from !== 'cmdz') {
+    if (isBotSeat(c.owner) || pref(c.owner, 'cmdToZone')) to = 'cmdz';
   }
   if (from === 'bf' && to !== 'bf' && to !== 'exile' && c.unearthed) to = 'exile';
   if (from === 'hand' && to === 'gy' && G.bf.some(id => { const x = G.cards[id]; return x && x.ctl === c.owner && AB(x).necroDiscard; })) to = 'exile';
@@ -2016,7 +2018,7 @@ function moveCard(c, to, opts = {}) {
     if (from !== 'bf') onEnter(c);
     if (from !== 'bf' && c.ctl !== c.owner && !c.token && !isType(c, 'land') && c.zone === 'bf') for (const x of permsOf(c.ctl)) if (AB(x).brainstealer && alive(c.owner)) { const mv = D(c).cmc || 0; if (mv) { loseLife(c.owner, mv); log(`${cn(x)}: ${pn(c.owner)} pierde ${mv} vidas (${cn(c)}).`, 'bad'); } }
   }
-  if (leavingBf) onLeave(c, intended, ctl, wasCreature);
+  if (leavingBf) onLeave(c, c.token ? to : c.zone, ctl, wasCreature);
   if (from === 'bf' || to === 'bf') recomputeMods();
 }
 function onEnter(c) {
@@ -4344,7 +4346,7 @@ async function castSpell(s, c, opts = {}) {
   if (by != null) {
     if (prevStack != null && G.cards[prevStack] && G.cards[prevStack].zone === 'stack') G.stack = prevStack;
     c.zone = null; c.overloaded = false; if (c.advFrom) { c.n = c.advFrom; c.advFrom = null; }
-    if (c.isCmd) putZone(c, 'cmdz'); else putZone(c, 'gy');
+    putZone(c, c.fbExile ? 'exile' : 'gy'); c.fbExile = false; sba();
     render(); return false;
   }
   if ((bot ? rops : AB(c).spell).some(o => o.k === 'massBounce' && o.keepOne) && c.zone === 'stack') {
@@ -4659,6 +4661,15 @@ function sba() {
   recomputeMods();
   for (let guard = 0; guard < 12; guard++) {
     let changed = false;
+    // Existing UI preference is a standing choice; do not replace the death event.
+    for (const c of Object.values(G.cards)) {
+      if (!c.mcCommandPending) continue;
+      c.mcCommandPending = false;
+      if (c.isCmd && (c.zone === 'gy' || c.zone === 'exile') && alive(c.owner) && (isBotSeat(c.owner) || pref(c.owner, 'cmdToZone'))) {
+        moveCard(c, 'cmdz', { noRedirect: true }); changed = true;
+        log(`${cn(c)} vuelve a la zona de mando.`, 't');
+      }
+    }
     for (const id of [...G.bf]) {
       const c = G.cards[id]; if (!c || c.zone !== 'bf') continue;
       if (isCreature(c)) {
@@ -5347,7 +5358,7 @@ async function botTurn(s) {
   __R(ME, G, await flushPendingCasts()); sba(); if (G.over || p.dead) return;
   __R(ME, G, await suspendStep(s)); if (G.over || p.dead) return;
   xDrawStep(s); sba(); if (G.over || p.dead) return;
-  G.drawStep = s; try { if (G.turnsTaken > 0 && !permsOf(s).some(x => AB(x).skipDraw)) drawCards(s, 1); } finally { G.drawStep = null; }
+  G.drawStep = s; try { if ((!G.duel || G.turnsTaken > 0) && !permsOf(s).some(x => AB(x).skipDraw)) drawCards(s, 1); } finally { G.drawStep = null; }
   G.phase = 'main';
   __R(ME, G, await mainPhaseTriggers(s));
   sagaStep(s); __R(ME, G, await flushPendingCasts());
@@ -5387,7 +5398,7 @@ async function userTurn(s) {
   if (UI.prompts.length) { __R(ME, G, await resolveNewPrompts(0)); sba(); render(); if (G.over || p.dead) return; }
   __R(ME, G, await suspendStep(s)); if (G.over || p.dead) return;
   xDrawStep(s); sba(); if (G.over || p.dead) return;
-  G.drawStep = s; try { if (SET.autoDraw && G.turnsTaken > 0 && !permsOf(s).some(x => AB(x).skipDraw)) drawCards(s, 1); } finally { G.drawStep = null; }
+  G.drawStep = s; try { if (SET.autoDraw && (!G.duel || G.turnsTaken > 0) && !permsOf(s).some(x => AB(x).skipDraw)) drawCards(s, 1); } finally { G.drawStep = null; }
   G.phase = 'main'; UI.busy = true;
   __R(ME, G, await mainPhaseTriggers(s));
   sagaStep(s);
@@ -6315,7 +6326,8 @@ async function userPlay(c) {
   pushUndo();
   const isL = isType(c, 'land');
   if (isL) {
-    if ((G.p[ME].landsPlayed || 0) >= landLimit(ME)) toast('Ya has jugado todas las tierras permitidas este turno (no se bloquea).');
+    if (G.active !== ME || !['main', 'post'].includes(G.phase) || G.stack != null) { toast('Solo puedes jugar una tierra durante tu fase principal con la pila vacía.', true); return; }
+    if ((G.p[ME].landsPlayed || 0) >= landLimit(ME)) { toast('Ya has jugado todas las tierras permitidas este turno.', true); return; }
     const n0 = UI.prompts.length;
     const entryLife = AB(c).tapUnless?.payLife;
     if (entryLife) {
@@ -6330,7 +6342,7 @@ async function userPlay(c) {
     return;
   }
   if (noNormalCast(c)) { toast('Esta carta no tiene coste de maná: usa «Suspender» desde su menú (clic derecho).'); return; }
-  if (G.p[ME].noMoreSpells === G.turnsTaken) toast('Conduit of Worlds: no deberías lanzar más hechizos este turno (no se bloquea).');
+  if (G.p[ME].noMoreSpells === G.turnsTaken) { toast('No puedes lanzar más hechizos este turno (Conduit of Worlds).', true); return; }
   c.xVal = 0; c.kicked = false;
   if (parseCost(D(c).mana_cost).x) { const mx = maxXFor(ME, c); const v = __R(ME, G, await askNumber(`${D(c).name}: elige X`, mx, mx)); if (v == null) return; c.xVal = Math.max(0, v | 0); }
   { const mk = abOf(D(c)).multikicker; if (mk) { c.kickN = 0; let mx = 0; while (mx < 10 && solve(ME, Object.assign({}, fullCost(Object.assign({}, c, { kickN: mx + 1 }), ME)))) mx++; const v = __R(ME, G, await askNumber(`${D(c).name}: ¿cuántas veces pagas el multiestímulo ${abOf(D(c)).multikickerText || '{' + mk + '}'}?`, mx, mx)); if (v == null) return; c.kickN = Math.max(0, v | 0); } }
@@ -9883,7 +9895,7 @@ function fxAuditOk(a) {
       if (exiledDie) { G.fxVrenT !== G.turnsTaken && (G.fxVrenT = G.turnsTaken, G.fxVrenN = 0); G.fxVrenN++; log(`${cn(exiledDie)}: ${cn(c)} se exilia en vez de morir.`); if (AB(exiledDie).fxExileOppDies === 'wolf' && !tokenCap(exiledDie.ctl)) { makeToken(exiledDie.ctl, { name: 'Wolf', p: 2, t: 2, colors: ['G'], kws: [] }); log(`${pn(exiledDie.ctl)} crea un Lobo 2/2.`); } }
       if (info && to !== 'bf') {
         fxBatchNext();
-        if (to === 'gy' || exiledDie) { if (info.wasCre) { const q = G.p[info.ctl]; if (q.fxDiedT !== G.turnsTaken) { q.fxDiedT = G.turnsTaken; q.fxDiedN = 0; } q.fxDiedN++; fxEv('dies', { c, ctl: info.ctl, wasCre: true }); } if (info.food) fxEv('foodGy', { c, ctl: info.ctl }); }
+        if (to === 'gy' && !exiledDie) { if (info.wasCre) { const q = G.p[info.ctl]; if (q.fxDiedT !== G.turnsTaken) { q.fxDiedT = G.turnsTaken; q.fxDiedN = 0; } q.fxDiedN++; fxEv('dies', { c, ctl: info.ctl, wasCre: true }); } if (info.food) fxEv('foodGy', { c, ctl: info.ctl }); }
         else fxEv('leave', { c, ctl: info.ctl, wasCre: info.wasCre });
         for (const x of permsAll()) if (x.fxWhile) { x.fxWhile = x.fxWhile.filter(w => { if (w.by === c.id) { x.tkwPerm = (x.tkwPerm || []).filter((k, i, arr) => !(k === w.kw && arr.indexOf(k) === i)); return false; } return true; }); }
         for (const x of permsAll()) if (x.fxNoDmgBy === c.id) x.fxNoDmgBy = null;

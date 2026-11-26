@@ -6,6 +6,10 @@ Un único motor JavaScript autoritativo, compartido por humanos y bots, capaz de
 
 No hay certificación de cobertura total actualmente. Véase [auditoría del estado actual](migration-status.md).
 
+## Avance de implementación
+
+El primer núcleo independiente está en `server/engine/core.mjs`. Se han añadido primitivas para las fases 1–5 y pruebas de contrato, no una implementación integral de esas fases ni un reemplazo del flujo de Chromium. Los cambios activos y sus límites se detallan en [estado actual](migration-status.md). Las fases y criterios siguientes siguen vigentes.
+
 ## Arquitectura objetivo
 
 Separar gradualmente del HTML un núcleo testeable sin DOM, con comandos validados, estado serializable, identificadores de objeto por cambio de zona, eventos tipados, pila, prioridad, motor de efectos continuos y reemplazos, solicitudes de decisión, registro reproducible y vistas privadas por jugador. La interfaz muestra el estado; no decide qué es legal. Los bots eligen entre las mismas acciones legales. Mantener el contenedor, servidor y API existentes durante la transición; no activar una ruta incompleta en producción.

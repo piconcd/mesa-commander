@@ -62,6 +62,10 @@ El objetivo es un único motor nativo que ejecute todas las reglas aplicables, c
 - [Auditoría técnica y estado actual](docs/migration-status.md).
 - [Plan de conformidad, fases y criterios de aceptación](docs/rules-engine-migration.md).
 
+### Avance del motor nativo
+
+Se han incorporado correcciones activas de Commander, restricciones de tierras y lanzamientos, y un núcleo independiente de reglas en `server/engine/core.mjs` con pruebas específicas. El nuevo núcleo aún no dirige las partidas reales: su integración con las cartas y la interfaz sigue pendiente. **No se ha alcanzado la compatibilidad completa**. Consulta el [detalle de la entrega](docs/migration-status.md).
+
 ### Pruebas y seguimiento
 
 Las correcciones se probarán durante las partidas reales en la instalación habitual; no es necesario montar otro servidor. Las pruebas automáticas de GitHub Actions complementan este proceso, pero no certifican una partida completa ni todas las interacciones de Magic. Para comprobar el código localmente, ejecuta `npm run check` y `node --test tests/*.test.mjs`. La auditoría de cobertura es estática; no implica una ejecución satisfactoria de CI ni de partidas reales.

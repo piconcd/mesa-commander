@@ -34,3 +34,17 @@ Los números de línea corresponden a la revisión auditada de [app/index.html](
 Hay pruebas de regresión de sintaxis, selección de maná, shocklands, afinidad, voz, reinicio central, catálogo y efectos opcionales/contadores. No equivalen a una suite integral de conformidad. Esta auditoría no ejecutó CI ni una partida real, y no mide un porcentaje de cobertura. Se requiere inventario por regla y carta, pruebas de interacción y escenarios multijugador.
 
 Véase [plan de conformidad](rules-engine-migration.md) para implementación y criterios de aceptación. Las reglas oficiales se consultan en https://magic.wizards.com/en/rules y las notas de colección complementan el reglamento.
+
+## Entrega incremental del motor (sin validación funcional)
+
+Se incorpora `server/engine/core.mjs`, un núcleo independiente de la interfaz con estado serializable, referencias por generación de objeto, pila LIFO, prioridad y pases, orden APNAP de disparadas, preparación transaccional de acciones, comprobación de objetivos al resolver, aplicación ordenada de reemplazos, orden de efectos clasificados por capa y detección de un subconjunto de acciones basadas en estado. Incluye casos de prueba en `tests/native-rules-core.test.mjs`. **El núcleo aún no sustituye a la ruta de juego de Chromium**: los adaptadores de cartas, eventos, costes, capas, decisiones y fases deben integrarse antes de considerarlo completo.
+
+Cambios activos en `app/index.html`:
+
+- Commander multijugador: el primer jugador roba en su primer turno; se conserva la excepción del primer turno de duelo.
+- Jugar tierras: se rechaza fuera de la propia fase principal con pila vacía y cuando se supera el límite.
+- Se impide el lanzamiento por la ruta normal si ya se aplicó la restricción de Conduit of Worlds.
+- Los comandantes enviados a cementerio/exilio llegan a esa zona; el retorno automático se aplica en la comprobación de estado, usando la preferencia del propietario (bots: sí). Mano/biblioteca conservan el tratamiento de reemplazo. La elección individual en cada evento y su orden correcto respecto a todas las disparadas siguen pendientes.
+- La ruta de contrahechizo envía al cementerio o exilio según flashback, antes de las comprobaciones de estado; se corrige un caso de disparadas de muerte al aplicar exilio en lugar de morir.
+
+Estas son correcciones parciales sobre el motor existente; no garantizan conformidad universal. Se ha comprobado la sintaxis del script HTML y del núcleo, pero no se han ejecutado las nuevas pruebas funcionales ni partidas. La regla de leyendas, la resolución simultánea, los efectos de capas y reemplazo reales, las cuatro mecánicas de bending, todos los costes/objetivos y las cartas Oracle siguen pendientes de integración general.
