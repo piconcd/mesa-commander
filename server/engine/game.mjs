@@ -258,7 +258,7 @@ function resolveOps(s,item,selected,ctx) {
   }
 }
 function losePlayers(s,losers,ctx) {
-  for(const p of losers){s.players[p].lost=true;emit(s,{kind:'lose',player:p});}
+  for(const p of losers){s.players[p].lost=true;s.players[p].library=[];s.players[p].mana=emptyMana();emit(s,{kind:'lose',player:p});}
   const removed=new Set(losers);
   s.stack=s.stack.filter(x=>!removed.has(x.controller)&&(!x.cardRef||!removed.has(dereference(s,x.cardRef)?.owner)));
   s.pending=s.pending.filter(x=>!removed.has(x.controller));
@@ -514,7 +514,7 @@ function dispatch(s,p,cmd,ctx) {
     case 'attackers':attackers(s,p,cmd,ctx);break;
     case 'blockers':blockers(s,p,cmd,ctx);break;
     case 'concede':
-      losePlayers(s,[p],ctx);if(!s.result&&s.priority!==null)checkpoint(s,ctx,s.priority);break;
+      losePlayers(s,[p],ctx);if(!s.result&&s.priority!==null)checkpoint(s,ctx,s.priority);else if(!s.result&&s.step==='blockers'&&s.combat){s.combat.defenders=s.combat.defenders.filter((q,i)=>i<s.combat.defenderIndex||q!==p);if(s.combat.defenderIndex>=s.combat.defenders.length)checkpoint(s,ctx);}break;
     case 'pass':
       requirePriority(s,p);
       check(!(s.step==='attackers'&&!s.combat.attackersDeclared),'Declare attackers first');
