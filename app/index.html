@@ -14923,6 +14923,347 @@ Object.assign(XTEXT, {
   l8Flicker: () => 'Exiliar hasta una criatura o tierra tuya; vuelve al final del turno'
 });
 
+/* =====================================================================
+   The Lord of the Rings / The Hobbit (tanda 9)
+   A · Equip costs (CR 702.6, 601.2f: reductions only lower the generic part):
+       «equip abilities you activate cost {N} less», «… that target ~ cost {N} less», «you may pay {0} rather
+       than pay the equip cost of the first equip ability you activate each turn / during each of your turns»
+       (Kíli only with an enduring story). The human now chooses the creature first and then pays.
+   B · Static abilities: «as long as you control a Goblin or Orc, ~ gets …», «~ has … as long as it's equipped»,
+       «… as long as two or more creatures died under your control this turn», «… lore counters among Sagas»,
+       «as long as equipped creature is legendary, it has …», «~ can't block unless you control …»,
+       «legendary creatures / creature tokens / other Spiders / Treefolk you control get … and have … (ward {N})»,
+       «~ can't be blocked except by legendary creatures», «your opponents can't gain life».
+   C · Triggers and effects: X pumps and damage «where X is the number of … you control», «up to two target
+       creatures each …», «… library second / fifth from the top», «its owner shuffles it into their library»,
+       «attach it to target (legendary) creature you control», «you may reveal the top card…», counters on
+       «another target creature» with a power check, dies / enters triggers with a power limit, «becomes blocked»,
+       Boromir («if no mana was spent to cast it, counter that spell»), Uncover the Moon-Letters, Silvan Reveler.
+   ===================================================================== */
+/* ---------- A · equip costs ---------- */
+function l9EqMark(s) { if (G && G.p[s]) G.p[s].l9EqT = G.turnsTaken; }
+function l9EqFree(s) {
+  if (!G || !G.p[s] || G.p[s].l9EqT === G.turnsTaken) return false; // only the first equip ability this turn
+  return permsOf(s).some(x => { const f = AB(x).l9EqFree; return f === 'story' ? fxStory(s) : f === 'myTurn' ? G.active === s : false; });
+}
+{ const _ec = equipCost; equipCost = function (e, s, tgt) {
+  const r = _ec(e, s); if (!r || !G || !G.p[s]) return r;
+  G.l9EqLast = { e: e.id, s };
+  if (l9EqFree(s)) return { generic: 0, pips: [] };
+  let less = 0; for (const x of permsOf(s)) less += AB(x).l9EqLess || 0;
+  if (tgt && tgt.zone === 'bf') less += AB(tgt).l9EqLessTgt || 0;
+  r.generic = Math.max(0, r.generic - less); return r;
+}; }
+// bots: equipCost → pay → fxEv('activate') → attachTo; remember that the first equip of the turn was used
+{ const _fe = fxEv; fxEv = function (ev, info) {
+  if (ev === 'activate' && info && info.c && G && G.l9EqLast && G.l9EqLast.e === info.c.id && isBotSeat(info.ctl) && abOf(D(info.c)).equip) { l9EqMark(info.ctl); G.l9EqLast = null; }
+  const r = _fe.apply(this, arguments);
+  // «when ~ is put into a graveyard from the battlefield» on an artifact or enchantment (Lembas): the engine only
+  // ran these for creatures that died
+  if (ev === 'x26leave' && info && info.c && info.intended === 'gy' && !info.wasCre && G) {
+    try { const c = info.c; const a = abOf(D(c)); if (c.zone === 'gy' && a.dies.length && /\bis put into a graveyard from the battlefield\b/i.test(D(c).oracle_text || '')) trigger(c, a.dies); } catch (e) { console.error(e); }
+  }
+  return r;
+}; }
+// landfall abilities that work from the graveyard (Silvan Reveler): same moment as the normal landfall
+{ const _oe9 = onEnter; onEnter = function (c) {
+  const r = _oe9.apply(this, arguments);
+  try { if (G && c && c.zone === 'bf' && isLand(c) && G.p[c.ctl]) for (const id of G.p[c.ctl].gy.slice()) { const g = G.cards[id]; if (g && g.zone === 'gy') { const o = abOf(D(g)).l9GyLandfall; if (o) trigger(g, o); } } } catch (e) { console.error(e); }
+  return r;
+}; }
+// humans: choose the creature first, then pay the cost for that creature
+{ const _ua = userAttach; userAttach = async function (c, pay0) {
+  const ab0 = abOf(D(c)); if (!pay0 || !ab0.equip) return _ua(c, pay0);
+  const t = __R(ME, G, await pickTarget({ k: 'attach', f: 'creature you control' }, { seat: c.ctl, src: c }, `${D(c).name}: elige la criatura a la que equiparlo`));
+  if (!t || !t.card) { render(); return; }
+  const cost = equipCost(c, ME, t.card);
+  if (SET.autoTap) { const sol = solve(ME, cost); if (sol) pay(ME, sol); else log(`<span style="color:var(--brass2)">No tienes maná para equipar ${cn(c)}; se equipa igualmente.</span>`); }
+  fxEv('activate', { c, ctl: ME }); l9EqMark(ME);
+  attachTo(c, t.card); sba(); render();
+}; }
+
+/* ---------- B · static abilities ---------- */
+{ const _fc = fxCond; fxCond = function (cond, s, c) {
+  if (typeof cond === 'string' && cond.startsWith('l9')) {
+    if (cond.startsWith('l9ctl:')) { const ts = cond.slice(6).split('|'); return permsOf(s).some(x => fxIs(x, ts)); }
+    if (cond === 'l9equipped') return !!c && permsAll().some(x => x.att === c.id && /\bequipment\b/i.test(D(x).type_line || ''));
+    if (cond.startsWith('l9died:')) { const p = G.p[s]; return p.fxDiedT === G.turnsTaken && (p.fxDiedN || 0) >= +cond.slice(7); }
+    if (cond.startsWith('l9lore:')) return permsOf(s).filter(x => /\bsaga\b/i.test(D(x).type_line || '')).reduce((n, x) => n + (x.cnt.lore || 0), 0) >= +cond.slice(7);
+    return false;
+  }
+  return _fc(cond, s, c);
+}; }
+// «deathtouch and ward {2}», «vigilance» … → { kws, ward } or null if a part is not known
+function l9KwPart(txt) {
+  const out = { kws: [], ward: 0 };
+  for (const p of txt.split(/,\s*(?:and\s+)?|\s+and\s+/).map(x => x.trim()).filter(Boolean)) {
+    const w = p.match(/^ward \{(\d+)\}$/); if (w) { out.ward = +w[1]; continue; }
+    if (!KW_LIST.includes(p)) return null; out.kws.push(p);
+  }
+  return out.kws.length || out.ward ? out : null;
+}
+function l9GrantOk(g, x, c) {
+  if (!c || c.zone !== 'bf' || !isCreature(c) || c.ctl !== x.ctl) return false;
+  if (g.other && c.id === x.id) return false;
+  if (g.leg && !fxLegendary(c)) return false;
+  if (g.token && !c.token) return false;
+  if (g.types && !fxIs(c, g.types)) return false;
+  return true;
+}
+const l9Grants = s => permsOf(s).flatMap(x => (AB(x).l9Grants || []).map(g => [g, x]));
+{ const _ae = fxAnthemExtra; fxAnthemExtra = function (c) {
+  const r = _ae(c); let p = r[0], t = r[1];
+  try { if (G && c && c.ctl != null && G.p[c.ctl]) for (const [g, x] of l9Grants(c.ctl)) if ((g.p || g.t) && l9GrantOk(g, x, c)) { p += g.p; t += g.t; } } catch (e) { console.error(e); }
+  return [p, t];
+}; }
+{ const _wo = wardOf; wardOf = function (c) {
+  let n = _wo(c); if (!c || c.zone !== 'bf' || !G) return n;
+  for (const [g, x] of l9Grants(c.ctl)) if (g.ward && l9GrantOk(g, x, c)) n = Math.max(n, g.ward);
+  return n;
+}; }
+{ const _rm = recomputeMods; recomputeMods = function () {
+  const r = _rm.apply(this, arguments);
+  try {
+    if (!G) return r;
+    const M = c => c.mods || (c.mods = newMods());
+    for (const x of permsAll()) {
+      const a = AB(x);
+      for (const g of a.l9Grants || []) if (g.kws.length) for (const h of permsOf(x.ctl)) if (l9GrantOk(g, x, h)) M(h).kw.push(...g.kws);
+      if (a.l9AttLeg && x.att != null) { const h = G.cards[x.att]; if (h && h.zone === 'bf' && fxLegendary(h)) M(h).kw.push(...a.l9AttLeg); }
+      if (a.l9CantBlkUnless && !permsOf(x.ctl).some(y => fxIs(y, a.l9CantBlkUnless))) M(x).cantBlk = true;
+    }
+  } catch (e) { console.error(e); }
+  return r;
+}; }
+{ const _cb = canBlock; canBlock = function (b, a) { if (a && AB(a).l9BlkLegOnly && !fxLegendary(b)) return false; return _cb.apply(this, arguments); }; }
+{ const _gl = gainLife; gainLife = function (s, n) {
+  if (G && n > 0 && G.p[s]) { const g = permsAll().find(x => x.ctl !== s && AB(x).l9OppNoGain && !G.p[x.ctl].dead); if (g) { if (x26TurnOnce(g, 'l9nogain' + s)) log(`${cn(g)}: ${pn(s)} no puede ganar vidas.`); return 0; } }
+  return _gl.apply(this, arguments);
+}; }
+
+/* ---------- lines ---------- */
+function l9Line(a, l) {
+  let m; const t = l.replace(/\.$/, ''); const PE = parseEffects;
+  const self = (cond, p, tt, kwTxt) => { const k = kwTxt ? kwList(kwTxt) : []; if (kwTxt && k.join(' and ') !== kwTxt.replace(/,? and |, /g, ' and ')) return false; (a.selfCond ||= []).push({ cond, p, t: tt, kw: k }); return true; };
+  // A · equip
+  if ((m = t.match(/^equip abilities you activate that target (?:~|this creature) cost \{(\d+)\} less to activate$/))) { a.l9EqLessTgt = +m[1]; return true; }
+  if ((m = t.match(/^equip abilities you activate cost \{(\d+)\} less to activate$/))) { a.l9EqLess = +m[1]; return true; }
+  if (/^as long as you have an enduring story, you may pay \{0\} rather than pay the equip cost of the first equip ability you activate each turn$/.test(t)) { a.l9EqFree = 'story'; return true; }
+  if (/^you may pay \{0\} rather than pay the equip cost of the first equip ability you activate during each of your turns$/.test(t)) { a.l9EqFree = 'myTurn'; return true; }
+  if (/^during your turn, you may activate equip abilities any time you could cast an instant$/.test(t)) { a.l9EqInstant = true; return true; } // this engine has no timing limit on equip
+  // B · statics
+  if ((m = t.match(/^as long as you control an? ([a-z]+)(?: or an? ([a-z]+)| or ([a-z]+))?, ~ gets \+(\d+)\/\+(\d+)(?: and has ([a-z ,]+))?$/)) && !['artifact', 'token'].includes(m[1])) return self('l9ctl:' + [m[1], m[2] || m[3]].filter(Boolean).join('|'), +m[4], +m[5], m[6]);
+  if ((m = t.match(/^~ has ([a-z ,]+?) as long as it's equipped$/))) return self('l9equipped', 0, 0, m[1]);
+  if ((m = t.match(/^~ has ([a-z ,]+?) as long as (\w+) or more creatures died under your control this turn$/)) && cdNum(m[2]) > 0) return self('l9died:' + cdNum(m[2]), 0, 0, m[1]);
+  if ((m = t.match(/^as long as there are (\w+) or more lore counters among sagas you control, ~ has ([a-z ,]+)$/)) && cdNum(m[1]) > 0) return self('l9lore:' + cdNum(m[1]), 0, 0, m[2]);
+  if ((m = t.match(/^as long as equipped creature is legendary, it has ([a-z ,]+)$/))) { const k = l9KwPart(m[1]); if (!k || k.ward) return false; a.l9AttLeg = k.kws; return true; }
+  if ((m = t.match(/^~ can't block unless you control an? ([a-z]+)(?: or an? ([a-z]+)| or ([a-z]+))?$/))) { a.l9CantBlkUnless = [m[1], m[2] || m[3]].filter(Boolean); return true; }
+  if ((m = t.match(/^(other )?(legendary creatures|creature tokens|[a-z]+) you control (?:get \+(\d+)\/\+(\d+)(?: and have (.+))?|have (.+))$/))) {
+    const grp = m[2]; const has = m[5] || m[6] || ''; const k = has ? l9KwPart(has) : { kws: [], ward: 0 };
+    if (!k) return false;
+    if (!(grp === 'legendary creatures' || grp === 'creature tokens' || k.ward || grp === 'treefolk')) return false; // the older parser reads the rest
+    if (['creatures', 'other', 'nonlegendary'].includes(grp)) return false;
+    const g = { other: !!m[1], p: m[3] ? +m[3] : 0, t: m[4] ? +m[4] : 0, kws: k.kws, ward: k.ward };
+    if (grp === 'legendary creatures') g.leg = true; else if (grp === 'creature tokens') g.token = true; else g.types = [FX_SING(grp)];
+    (a.l9Grants ||= []).push(g); return true;
+  }
+  if (/^~ can't be blocked except by legendary creatures$/.test(t)) { a.l9BlkLegOnly = true; return true; }
+  if (/^your opponents can't gain life$/.test(t)) { a.l9OppNoGain = true; return true; }
+  // C · triggers
+  if ((m = t.match(/^whenever ~ or another creature you control with power (\d+) or greater dies, (.+)$/))) {
+    const n = +m[1]; const ops = PE(m[2]); if (!l7Safe(m[2], ops)) return false;
+    return x26Trig(a, { ev: 'dies', who: 'you', self: true, run: (x, info) => { const c = info.c; if (!c) return; if (c.id !== x.id) { const p = c._lastP != null ? c._lastP : P(c); if (p < n) return; } trigger(x, ops); } });
+  }
+  if ((m = t.match(/^whenever another creature you control dies, put a \+1\/\+1 counter on ~\. if that creature was an? ([a-z]+) or ([a-z]+), put two \+1\/\+1 counters on ~ instead$/))) {
+    const ts = [m[1], m[2]];
+    return x26Trig(a, { ev: 'dies', who: 'you', run: (x, info) => { const c = info.c; if (!c || c.id === x.id || x.zone !== 'bf') return; trigger(x, [{ k: 'selfCounters', n: fxIs(c, ts) ? 2 : 1 }]); } });
+  }
+  // Gimli, Mournful Avenger: the fight only when the ability resolves for the third time this turn
+  if (/^whenever another creature you control dies, put a \+1\/\+1 counter on ~\. when this ability resolves for the third time this turn, ~ fights up to one target creature you don't control$/.test(t)) {
+    const fight = PE("~ fights up to one target creature you don't control"); if (fight.length !== 1) return false;
+    return x26Trig(a, { ev: 'dies', who: 'you', run: (x, info) => { const c = info.c; if (!c || c.id === x.id || x.zone !== 'bf') return; const n = fxCount(x, 'l9gimli'); trigger(x, n === 3 ? [{ k: 'selfCounters', n: 1 }, ...fight] : [{ k: 'selfCounters', n: 1 }]); } });
+  }
+  // landfall from the graveyard (Silvan Reveler): «you may pay {…}. if you do, return ~ from your graveyard to your hand»
+  if ((m = t.match(/^whenever a land you control enters, (you may pay ((?:\{[^}]+\})+)\. if you do, return ~ from your graveyard to your hand)$/))) {
+    const ops = PE(m[1]); if (ops.length !== 1 || ops[0].k !== 'mayPay') return false;
+    a.l9GyLandfall = ops; return true;
+  }
+  if ((m = t.match(/^whenever ~ or another nontoken creature you control with power (\d+) or less enters, (.+)$/))) {
+    const n = +m[1]; const ops = PE(m[2]); if (!l7Safe(m[2], ops)) return false;
+    return x26Trig(a, { ev: 'enter', who: 'you', run: (x, info) => { const c = info.c; if (!c) return; if (c.id !== x.id && (c.token || !isCreature(c) || P(c) > n)) return; trigger(x, ops); } });
+  }
+  if ((m = t.match(/^whenever one or more creatures your opponents control die, (.+?)\. this ability triggers only once each turn$/))) {
+    const ops = PE(m[1]); if (!l7Safe(m[1], ops)) return false;
+    return x26Trig(a, { ev: 'dies', who: 'opp', run: (x, info) => { if (!info.c || x.zone !== 'bf' || !x26TurnOnce(x, 'l9oppdie')) return; trigger(x, ops); } });
+  }
+  if ((m = t.match(/^whenever ~ becomes blocked, it deals (\d+) damage to each creature blocking it$/))) { a.l9BlockedDmg = +m[1]; return true; }
+  if (/^whenever an opponent casts a spell, if no mana was spent to cast it, counter that spell$/.test(t)) {
+    return x26Trig(a, { ev: 'x26cast', who: 'opp', run: (x, info) => {
+      const c = info.c; if (!c || info.spent !== 0) return;
+      if (AB(c).uncounterable || c.noCounter || permsOf(info.s).some(y => AB(y).fxNoCounterAll)) { log(`${cn(x)}: ${cn(c)} se lanzó sin gastar maná, pero no se puede contrarrestar.`); return; }
+      c.l9Countered = x.id; log(`${cn(x)}: ${cn(c)} se lanzó sin gastar maná: queda contrarrestado.`, 'bad');
+    } });
+  }
+  if (/^whenever you cast a noncreature spell, you may draw x cards, where x is the amount of mana spent to cast that spell\. if you do, discard two cards$/.test(t)) {
+    return x26Trig(a, { ev: 'x26cast', who: 'you', run: (x, info) => { const c = info.c; if (!c || /\bcreature\b/i.test(D(c).type_line || '') || !(info.spent > 0)) return; trigger(x, [{ k: 'l9DrawXDisc', n: info.spent, disc: 2 }]); } });
+  }
+  return false;
+}
+{ const _el = eoeLine; eoeLine = function (a, l, PE) { if (l9Line(a, l)) return true; return _el(a, l, PE); }; }
+// Boromir: the countered spell goes to its owner's graveyard instead of resolving
+{ const _cs9 = castSpell; castSpell = async function (s, c, opts) { if (c) c.l9Countered = null; return _cs9.apply(this, arguments); }; }
+{ const _rs9 = resolveSpell; resolveSpell = function (s, c) {
+  if (c && c.l9Countered != null) {
+    const by = G.cards[c.l9Countered]; c.l9Countered = null; c.zone = null; c.xVal = 0; c.kicked = false;
+    if (c.advFrom) { c.n = c.advFrom; c.advFrom = null; }
+    putZone(c, c.isCmd ? 'cmdz' : 'gy'); log(`${by ? cn(by) : 'Boromir'} contrarresta ${cn(c)}.`, 'bad'); return;
+  }
+  return _rs9.apply(this, arguments);
+}; }
+// «whenever ~ becomes blocked, it deals N damage to each creature blocking it» (Battle-Scarred Goblin)
+{ const _lb = lotrBlocks; lotrBlocks = function (blocks) {
+  const r = _lb.apply(this, arguments);
+  try {
+    const by = {}; for (const [b, at] of Object.entries(blocks || {})) (by[at] ||= []).push(+b);
+    let hit = false;
+    for (const [aid, bids] of Object.entries(by)) { const a = G.cards[aid]; const n = a && a.zone === 'bf' ? AB(a).l9BlockedDmg : 0; if (!n) continue; for (const bid of bids) { const b = G.cards[bid]; if (b && b.zone === 'bf') { dealDamage(b, n, a); log(`${cn(a)} es bloqueado y hace ${n} de daño a ${cn(b)}.`); hit = true; } } }
+    if (hit) sba();
+  } catch (e) { console.error(e); }
+  return r;
+}; }
+
+/* ---------- C · whole sentences ---------- */
+// «the number of creatures you control plus the number of Foods you control» → ['creatures', 'foods']
+function l9CountSpec(txt) {
+  const out = [];
+  for (const p of txt.split(' plus ')) { const m = p.match(/^the number of (legendary creatures|[a-z]+) you control$/); if (!m || ['permanents', 'cards'].includes(m[1])) return null; out.push(m[1]); }
+  return out;
+}
+function l9Count(spec, s) {
+  let n = 0; const list = permsOf(s);
+  for (const w of spec) {
+    if (w === 'legendary creatures') n += list.filter(c => isCreature(c) && fxLegendary(c)).length;
+    else if (w === 'creatures') n += list.filter(isCreature).length;
+    else { const ty = w === 'plains' ? 'plains' : FX_SING(w); n += list.filter(c => fxIs(c, [ty])).length; }
+  }
+  return n;
+}
+const L9_POS = { second: 2, third: 3, fourth: 4, fifth: 5 };
+function l9Sentence(s, pe) {
+  let m;
+  if ((m = s.match(/^(?:it|~) gets \+x\/\+x until end of turn, where x is (.+)$/))) { const sp = l9CountSpec(m[1]); return sp ? [{ k: 'l9SelfPumpX', cnt: sp }] : null; }
+  if ((m = s.match(/^target ([a-z]+) you control gains ([a-z ]+?) and gets \+x\/\+x until end of turn, where x is (.+)$/))) { const sp = l9CountSpec(m[3]); const kws = kwList(m[2]); if (!sp || kws.join(' and ') !== m[2]) return null; return [{ k: 'l9PumpTX', sub: m[1] === 'creature' ? null : m[1], kws, cnt: sp }]; }
+  if ((m = s.match(/^~ deals x damage to target creature, where x is (.+)$/))) { const sp = l9CountSpec(m[1]); return sp ? [{ k: 'l9DmgTX', cnt: sp }] : null; }
+  if ((m = s.match(/^up to (two|three) target creatures each get \+(\d+)\/\+(\d+)(?: and gain ([a-z ]+?))? until end of turn$/))) { const kws = m[4] ? kwList(m[4]) : []; if (m[4] && kws.join(' and ') !== m[4]) return null; return [{ k: 'l9Multi', n: num(m[1]), each: 'pump', p: +m[2], t: +m[3], kws }]; }
+  if ((m = s.match(/^(?:~|it) deals (\d+) damage to each of up to (two|three) target creatures$/))) return [{ k: 'l9Multi', n: num(m[2]), each: 'dmg', dmg: +m[1] }];
+  if ((m = s.match(/^put target creature into its owner's library (second|third|fourth|fifth) from the top$/))) return [{ k: 'l9LibPosT', pos: L9_POS[m[1]] }];
+  if ((m = s.match(/^you may put (?:it|~) into its owner's library (second|third|fourth|fifth) from the top$/))) return [{ k: 'l9LibPosSelf', pos: L9_POS[m[1]] }];
+  if (/^its owner shuffles it into their library$/.test(s)) return [{ k: 'l9ShuffleSelf' }];
+  if (/^attach it to target creature you control\. untap that creature$/.test(s)) return [{ k: 'attach', f: 'creature you control', l7mark: true }, { k: 'l8UntapLast' }];
+  if (/^attach it to target legendary creature you control$/.test(s)) return [{ k: 'l9AttachLeg' }];
+  if ((m = s.match(/^scry (\d+), then you may reveal the top card of your library\. if a creature card is revealed this way, draw a card$/))) return [{ k: 'scry', n: +m[1] }, { k: 'l9RevealTop', type: 'creature' }];
+  if ((m = s.match(/^put an? ([a-z]+) counter on another target creature you control\. draw a card if that creature's power is (\d+) or less$/))) {
+    const a = pe(`put ${/^[aeiou]/.test(m[1]) ? 'an' : 'a'} ${m[1]} counter on target creature you control`); const d = pe('draw a card');
+    if (a.length !== 1 || !needsTarget(a[0]) || d.length !== 1) return null;
+    return [Object.assign({}, a[0], { l8other: true, l7mark: true }), Object.assign({}, d[0], { cnd: { k: 'l9tgtPow', max: +m[2], text: `that creature's power is ${m[2]} or less` } })];
+  }
+  if (/^draw a card, then discard a card\. if you discard a land card this way, put it from your graveyard onto the battlefield tapped$/.test(s)) return [{ k: 'l9LootLand' }];
+  return null;
+}
+{ const _pe = parseEffects; parseEffects = function (s) { const r = typeof s === 'string' ? l9Sentence(s.trim().replace(/\.$/, ''), _pe) : null; return r || _pe(s); }; }
+{ const _co = cdOk; cdOk = function (sp, ctx) {
+  if (sp && sp.k === 'l9tgtPow') { const c = ctx && ctx.lastTgt != null ? G.cards[ctx.lastTgt] : null; return !!c && c.zone === 'bf' && P(c) <= sp.max; }
+  return _co(sp, ctx);
+}; }
+
+/* ---------- C · ops ---------- */
+const l9Src = ctx => ctx && ctx.src ? (G.cards[ctx.src.id] || ctx.src) : null;
+function l9ToLib(c, pos) {
+  const o = c.owner; moveCard(c, 'lib'); if (c.zone !== 'lib') return false;
+  const lib = G.p[o].lib; const i = lib.indexOf(c.id); if (i >= 0) lib.splice(i, 1); lib.splice(Math.min(pos - 1, lib.length), 0, c.id);
+  log(`${cn(c)} se pone en la biblioteca de ${pn(o)}, ${pos === 2 ? 'segunda' : pos === 5 ? 'quinta' : pos + 'ª'} desde arriba.`); return true;
+}
+const l9Okc = (c, f, s) => !!(c && c.zone === 'bf' && isCreature(c) && matchFilter(c, f, s, false));
+EOE_TGT.l9PumpTX = {
+  valid: (op, ctx, x) => { const c = x && x.card; return l9Okc(c, 'creature you control', ctx.seat) && (!op.sub || fxIs(c, [op.sub])); },
+  target: (op, ctx) => bestBy(permsOf(ctx.seat).filter(c => l9Okc(c, 'creature you control', ctx.seat) && (!op.sub || fxIs(c, [op.sub]))), c => value(c) + (c.atk != null ? 5 : 0) + (!c.tapped ? 1 : 0))
+};
+EOE_TGT.l9DmgTX = {
+  valid: (op, ctx, x) => l9Okc(x && x.card, 'creature', ctx.seat),
+  target: (op, ctx) => { const n = l9Count(op.cnt, ctx.seat); const opp = permsAll().filter(c => c.ctl !== ctx.seat && l9Okc(c, 'creature', ctx.seat)); return bestBy(opp, c => value(c) + (toughLeft(c) <= n ? 20 : 0)) || null; }
+};
+EOE_TGT.l9MultiPick = { valid: (op, ctx, x) => l9Okc(x && x.card, 'creature', ctx.seat) && !(op.excl && op.excl.has(x.card.id)), target: () => null };
+EOE_TGT.l9LibPosT = {
+  valid: (op, ctx, x) => l9Okc(x && x.card, 'creature', ctx.seat),
+  target: (op, ctx) => bestBy(permsAll().filter(c => c.ctl !== ctx.seat && l9Okc(c, 'creature', ctx.seat)), c => value(c)) || null
+};
+EOE_TGT.l9AttachLeg = {
+  valid: (op, ctx, x) => { const c = x && x.card; const src = l9Src(ctx); return l9Okc(c, 'creature you control', ctx.seat) && fxLegendary(c) && (!src || c.id !== src.id); },
+  target: (op, ctx) => { const src = l9Src(ctx); return bestBy(permsOf(ctx.seat).filter(c => l9Okc(c, 'creature you control', ctx.seat) && fxLegendary(c) && (!src || c.id !== src.id)), c => value(c)) || null; }
+};
+function l9MultiBot(op, s) {
+  if (op.each === 'pump') return permsOf(s).filter(isCreature).sort((a, b) => (b.atk != null) - (a.atk != null) || value(b) - value(a)).slice(0, op.n);
+  return permsAll().filter(c => c.ctl !== s && l9Okc(c, 'creature', s)).sort((a, b) => (toughLeft(a) <= op.dmg ? 0 : 1) - (toughLeft(b) <= op.dmg ? 0 : 1) || value(b) - value(a)).slice(0, op.n);
+}
+function l9MultiDo(op, t, src) {
+  if (!t || t.zone !== 'bf') return;
+  if (op.each === 'pump') { t.tp += op.p; t.tt += op.t; if (op.kws.length) t.tkw.push(...op.kws); log(`${cn(t)} obtiene +${op.p}/+${op.t}${op.kws.length ? ' y ' + op.kws.map(k => KW_ES[k] || k).join(' y ') : ''} hasta el final del turno.`); }
+  else { dealDamage(t, op.dmg, src); log(`${src ? cn(src) : ''} hace ${op.dmg} de daño a ${cn(t)}.`, 'bad'); }
+}
+function l9Reveal(s, src) { const lib = G.p[s].lib; if (!lib.length) return null; const c = G.cards[lib[0]]; log(`${src ? cn(src) + ': ' : ''}${pn(s)} muestra la primera carta de su biblioteca: ${cn(c)}.`); return c; }
+function l9LootFinish(s, c) {
+  if (!c || c.zone !== 'hand') return; moveCard(c, 'gy'); log(`${pn(s)} descarta ${cn(c)}.`);
+  if (isLand(c) && c.zone === 'gy') { moveCard(c, 'bf', { ctl: s, tapped: true }); log(`${cn(c)} es una tierra: entra en el campo de batalla girada.`, 'good'); }
+}
+Object.assign(XOPS, {
+  l9SelfPumpX(op, ctx) { const c = l9Src(ctx); if (!c || c.zone !== 'bf') return; const n = l9Count(op.cnt, ctx.seat); c.tp += n; c.tt += n; log(`${cn(c)} obtiene +${n}/+${n} hasta el final del turno.`); },
+  l9PumpTX(op, ctx, t) { if (!t || t.zone !== 'bf') return; const n = l9Count(op.cnt, ctx.seat); t.tp += n; t.tt += n; if (op.kws.length) t.tkw.push(...op.kws); ctx.lastTgt = t.id; log(`${cn(t)} obtiene +${n}/+${n}${op.kws.length ? ' y ' + op.kws.map(k => KW_ES[k] || k).join(' y ') : ''} hasta el final del turno.`); },
+  l9DmgTX(op, ctx, t) { if (!t || t.zone !== 'bf') return; const n = l9Count(op.cnt, ctx.seat); const src = l9Src(ctx); dealDamage(t, n, src); log(`${src ? cn(src) : ''} hace ${n} de daño a ${cn(t)}.`, 'bad'); },
+  l9Multi(op, ctx) { const src = l9Src(ctx); for (const t of l9MultiBot(op, ctx.seat)) l9MultiDo(op, t, src); },
+  l9LibPosT(op, ctx, t) { if (t && t.zone === 'bf') l9ToLib(t, op.pos); },
+  l9LibPosSelf(op, ctx) { const c = l9Src(ctx); if (c && c.zone === 'gy') l9ToLib(c, op.pos); },
+  l9ShuffleSelf(op, ctx) { const c = l9Src(ctx); if (!c || c.zone !== 'gy') return; const o = c.owner; moveCard(c, 'lib'); if (c.zone === 'lib') { shuffle(G.p[o].lib); log(`${pn(o)} baraja ${cn(c)} en su biblioteca.`); } },
+  l9AttachLeg(op, ctx, t) { const src = l9Src(ctx); if (src && t) attachTo(src, t); },
+  l9RevealTop(op, ctx) { const c = l9Reveal(ctx.seat, l9Src(ctx)); if (c && isType(c, op.type)) drawCards(ctx.seat, 1); },
+  l9DrawXDisc(op, ctx) { const s = ctx.seat; if (op.n < 2) return; drawCards(s, op.n); for (let i = 0; i < op.disc; i++) { const c = worstInHand(s); if (!c) break; moveCard(c, 'gy'); log(`${pn(s)} descarta ${cn(c)}.`); } },
+  l9LootLand(op, ctx) { const s = ctx.seat; drawCards(s, 1); const hand = G.p[s].hand.map(id => G.cards[id]); const land = hand.find(c => isLand(c)); l9LootFinish(s, land || worstInHand(s)); }
+});
+Object.assign(XPROMPT, {
+  async l9Multi(op, pr) {
+    const s = pr.ctx.seat; const src = l9Src(pr.ctx); const excl = new Set();
+    for (let i = 0; i < op.n; i++) {
+      const t = __R(ME, G, await pickTarget({ k: 'l9MultiPick', excl }, pr.ctx, `${pr.title}: criatura ${i + 1} de hasta ${op.n} (Esc para terminar)`));
+      if (!t || !t.card) break; excl.add(t.card.id); l9MultiDo(op, t.card, src); sba(); render();
+    }
+    void s;
+  },
+  async l9LibPosSelf(op, pr) { const c = l9Src(pr.ctx); if (!c || c.zone !== 'gy') return; if (__R(ME, G, await askYesNo(pr.title, `¿Poner ${cn(c)} en tu biblioteca, ${op.pos === 5 ? 'quinta' : op.pos + 'ª'} desde arriba?`))) l9ToLib(c, op.pos); },
+  async l9RevealTop(op, pr) { if (!G.p[pr.ctx.seat].lib.length) return; if (__R(ME, G, await askYesNo(pr.title, '¿Mostrar la primera carta de tu biblioteca? Si es una criatura, robas una carta.'))) XOPS.l9RevealTop(op, pr.ctx); },
+  async l9DrawXDisc(op, pr) {
+    const s = pr.ctx.seat; if (!__R(ME, G, await askYesNo(pr.title, `¿Robar ${op.n} cartas y luego descartar ${op.disc}?`))) return;
+    drawCards(s, op.n); render();
+    for (let i = 0; i < op.disc && G.p[s].hand.length; i++) { let c = null; for (let k = 0; !c && k < 40; k++) c = __R(ME, G, await pickFromList(G.p[s].hand.map(id => G.cards[id]), `${pr.title}: descarta una carta (${i + 1} de ${op.disc})`)); if (!c) c = worstInHand(s); moveCard(c, 'gy'); log(`${pn(s)} descarta ${cn(c)}.`); render(); }
+  },
+  async l9LootLand(op, pr) {
+    const s = pr.ctx.seat; drawCards(s, 1); render(); if (!G.p[s].hand.length) return;
+    let c = null; for (let k = 0; !c && k < 40; k++) c = __R(ME, G, await pickFromList(G.p[s].hand.map(id => G.cards[id]), `${pr.title}: descarta una carta (si es una tierra, entra en el campo girada)`));
+    l9LootFinish(s, c || worstInHand(s));
+  }
+});
+Object.assign(XTEXT, {
+  l9SelfPumpX: o => `+X/+X hasta final de turno (X = ${o.cnt.join(' + ')})`,
+  l9PumpTX: o => `${o.sub || 'criatura'} tuya: ${o.kws.map(k => KW_ES[k] || k).join(' y ')} y +X/+X (X = ${o.cnt.join(' + ')})`,
+  l9DmgTX: o => `X de daño a una criatura (X = ${o.cnt.join(' + ')})`,
+  l9Multi: o => o.each === 'pump' ? `Hasta ${o.n} criaturas: +${o.p}/+${o.t}${o.kws.length ? ' y ' + o.kws.map(k => KW_ES[k] || k).join(' y ') : ''}` : `${o.dmg} de daño a cada una de hasta ${o.n} criaturas`,
+  l9LibPosT: o => `Poner una criatura en la biblioteca de su dueño, ${o.pos}ª desde arriba`,
+  l9LibPosSelf: o => `Puedes ponerla en la biblioteca de su dueño, ${o.pos}ª desde arriba`,
+  l9ShuffleSelf: () => 'Su dueño la baraja en su biblioteca',
+  l9AttachLeg: () => 'Anexarlo a una criatura legendaria tuya',
+  l9RevealTop: () => 'Puedes mostrar la primera carta; si es una criatura, robas',
+  l9DrawXDisc: o => `Puedes robar ${o.n} y descartar ${o.disc}`,
+  l9LootLand: () => 'Roba 1 y descarta 1; si descartas una tierra, entra girada'
+});
+
 </script>
 
 <script src="/config.js"></script>
