@@ -7,8 +7,8 @@ Actualmente lo alojamos en una **Raspberry Pi 5 con Docker**. Se accede mediante
 ## ✨ Funcionalidades
 
 - **Hasta cuatro jugadores humanos** desde distintas casas, en una misma mesa. Los asientos libres pueden ocuparse con bots.
-- **Partidas de Commander** con gestión de cartas, turnos, mesa, acciones y registro de la partida.
-- **Importación y selección de mazos**, con información de cartas obtenida mediante **Scryfall**.
+- **Partidas de Commander** con un motor de reglas JavaScript propio, automatización de los efectos compatibles, turnos, combate, decisiones individuales y registro de la partida.
+- **Importación y selección de mazos**, con información de cartas obtenida mediante **Scryfall** y actualización automática del catálogo Oracle.
 - **Chat de voz opcional** dentro del juego: unirse, silenciar el micrófono y salir del canal. Usa WebRTC y requiere permiso de micrófono.
 - **Servidor centralizado** con Node.js, WebSockets y un motor de juego ejecutado en Chromium dentro de Docker.
 - **Guardado de puntos de recuperación** de la partida. No garantiza restaurar cada acción si se produce un apagado inesperado.
@@ -29,17 +29,29 @@ Las correcciones de la [PR #1](https://github.com/piconcd/mesa-commander/pull/1)
 | Tutores | Revelación de las cartas buscadas cuando corresponda en los tutores compatibles. |
 | Fichas | Mejoras en la carga de imágenes de tokens. |
 | Sagas | Correcciones en las solicitudes de decisión y en la gestión de capítulos, que avanzan al comienzo de la primera fase principal según las reglas generales. |
-| Calidad | Pruebas de regresión automáticas y validación independiente del proxy de XMage Nexus mediante GitHub Actions. |
+| Calidad | Pruebas de regresión automáticas mediante GitHub Actions. |
 
-### Motor de reglas: migración a XMage
+### Motor de reglas propio y actualización automática
 
-La partida **continúa utilizando el motor JavaScript original** ejecutado en Chromium. XMage Nexus es el candidato para sustituirlo y su proxy ya cuenta con una comprobación independiente en CI, pero todavía no existe una integración operativa con Mesa Commander.
+El motor JavaScript existente, ejecutado en Chromium dentro del servidor central, es la base de todas las partidas. El objetivo es automatizar todos los efectos e interacciones de Magic: The Gathering conforme al reglamento oficial, solicitando una elección individual al jugador correspondiente cuando las reglas lo requieran. Los bots utilizan el mismo motor.
 
-El objetivo es delegar en XMage las reglas, prioridades, pila, combate, costes, habilidades y decisiones legales de Commander, manteniendo la interfaz web y el chat de voz.
+La [ampliación del motor y del catálogo de reglas](https://github.com/piconcd/mesa-commander/commit/676ea924b1b625e6320cc7b895cf1d9ee28b2518) incorpora los siguientes cambios:
 
-Quedan pendientes la integración del adaptador, el soporte efectivo de las mecánicas de Avatar (incluido bending), interacciones complejas como Teferi's Protection, y la validación integral de partidas de cuatro jugadores y compatibilidad ARM64.
+| Área | Cambios publicados |
+| --- | --- |
+| Reglamento oficial | Descarga del texto de las [Comprehensive Rules de Wizards](https://magic.wizards.com/en/rules), con registro de su versión mediante hash. |
+| Catálogo Oracle | Actualización de [Scryfall Bulk Data](https://scryfall.com/docs/api/bulk-data) al arrancar y diariamente a partir de las 07:00 (Europe/Madrid). |
+| Persistencia | Conservación del último catálogo válido en `/data/rules/` si falla una descarga. |
+| Mazos | Actualización de las definiciones Oracle disponibles antes de iniciar una partida central, incluidos los mazos de los bots, conservando las imágenes existentes. |
+| Automatización | Asistencia obligatoria para los efectos compatibles en partidas centralizadas. |
+| Decisiones | Diálogos individuales para determinadas habilidades opcionales de robo y ganancia de vidas; decisiones automáticas para bots. |
+| Reglas de estado | Corrección del registro de ganancia de vida prohibida y cancelación de contadores +1/+1 y -1/-1 opuestos. |
+| Cobertura | Auditoría parcial de habilidades no reconocidas, con avisos a los jugadores correspondientes. |
+| Pruebas | Nuevos casos de regresión del catálogo, horario de Madrid, habilidades opcionales y contadores. |
 
-Más información: [estado de la migración](docs/migration-status.md) y [plan técnico](docs/rules-engine-migration.md).
+**Estado de cobertura:** el motor todavía no implementa todas las reglas ni todas las cartas. Quedan pendientes, entre otras, las prioridades y la pila de habilidades disparadas, las capas y los efectos de reemplazo completos, las mecánicas de Avatar y las interacciones complejas. La actualización de datos no convierte automáticamente el reglamento en código ejecutable: una mecánica nueva que el intérprete no admita necesitará desarrollo. Las pruebas completas multijugador y ARM64 están pendientes de validación.
+
+Más información: [estado del motor de reglas](docs/migration-status.md).
 
 ### Pruebas y seguimiento
 
@@ -64,7 +76,7 @@ No necesitas instalar Docker, Tailscale ni el juego en tu ordenador para jugar. 
 
 ### 1. Accede al repositorio
 
-Puedes consultar el código públicamente. Para colaborar con permisos de escritura, pide a la persona administradora que te invite en GitHub. También puedes proponer cambios desde un fork. **No necesitas acceso SSH a la Raspberry**.
+Puedes consultar el código públicamente. Para colaborar con permisos de escritura, pide a la persona administradora que te invite en GitHub. Si no tienes permisos, puedes proponer cambios mediante una Issue. **No necesitas acceso SSH a la Raspberry**.
 
 ### 2. Elige qué mejorar
 
@@ -74,33 +86,39 @@ Puedes consultar el código públicamente. Para colaborar con permisos de escrit
 | Apariencia, interfaz y lógica original del juego | `app/index.html` |
 | Comunicación y servidor centralizado | `server/` |
 | Instrucciones del proyecto | `README.md` |
-| Contenedores y despliegue | `compose.yaml`, `Dockerfile`, `deploy/`, `scripts/` |
-| Migración a XMage | `docs/` |
+| Contenedor y despliegue | `compose.yaml`, `Dockerfile`, `deploy/`, `scripts/` |
+| Motor de reglas y catálogo Oracle | `app/index.html`, `server/central.js`, `server/rules-catalog.mjs`, `docs/migration-status.md` |
 | Pruebas automáticas | `tests/`, `.github/workflows/` |
 
-### 3. Propón tu cambio (sin usar la terminal)
+### 3. Publica tu cambio
 
-1. En GitHub, abre el archivo que quieras editar y pulsa el **icono del lápiz**.
-2. Realiza los cambios y selecciona la opción de **crear una rama nueva** en lugar de modificar directamente `main`.
-3. Guarda el cambio (*Commit changes*) y abre un **Pull Request** explicando qué has cambiado y por qué.
-4. El administrador revisará la propuesta. Si la aprueba, la incorporará a `main`.
-5. El servidor comprobará los cambios en su siguiente ejecución programada y los aplicará aunque haya una partida en curso.
+1. Si no tienes permisos de escritura, abre una Issue con tu propuesta para que una persona autorizada pueda incorporarla.
+2. Si tienes permisos, abre el archivo en GitHub y pulsa el icono del lápiz, o trabaja en una copia local de la rama `main`.
+3. Realiza y revisa los cambios, ejecuta las pruebas disponibles y agrupa los archivos relacionados en un commit coherente.
+4. Publica el commit directamente en `main`. No crees ramas de versiones alternativas ni despliegues paralelos.
+5. El servidor recogerá los cambios en su siguiente actualización programada, aunque haya una partida activa.
 
-También puedes trabajar con **GitHub Desktop** o Git desde tu ordenador: clona el repositorio, crea una rama, modifica los archivos, haz *commit*, publica la rama y abre un Pull Request.
+Para comunicar un fallo, abre una **Issue** con los pasos para reproducirlo, el comportamiento esperado y lo que ocurrió. Si afecta a la interfaz, añade una captura sin información privada.
 
-**Para ayudarnos a revisar tu Pull Request**, explica brevemente el objetivo, los archivos modificados, cómo has probado el cambio y, si afecta a la interfaz, añade una captura de pantalla. Para reportar fallos, abre una **Issue** con los pasos para reproducirlo, el comportamiento esperado y lo que ocurrió.
+### Política obligatoria de actualizaciones y despliegue
+
+- **Una única rama de publicación: `main`.** Todos los cambios se publican directamente en ella. No se mantienen ramas de desarrollo, versiones alternativas ni instalaciones paralelas de Mesa Commander.
+- **Un único contenedor Docker para Mesa Commander: `mesa-commander`**, correspondiente al servicio `commander` de Docker Compose. Todas las funciones del juego, el motor de reglas, el catálogo y el servidor se integran en el contenedor existente. No se crean contenedores nuevos ni instancias adicionales del juego.
+- **Actualización automática a las 07:00 (Europe/Madrid)**: se comprueba `origin/main` y, cuando hay cambios, se reconstruye y sustituye el contenedor existente, incluso si hay jugadores conectados, partidas activas o conversaciones de voz. No se aplaza el despliegue por actividad de los usuarios.
+- Se conserva el diseño de la aplicación, el chat de voz y la persistencia de datos, salvo cambios expresamente solicitados. Se mantienen las comprobaciones e intentos de restauración existentes si falla el despliegue.
+- La copia de producción en la Raspberry Pi no se edita directamente; GitHub es la fuente de los cambios. Las pruebas se realizan sin instalar una segunda versión de la aplicación en producción.
 
 ### Reglas importantes para colaborar
 
 - **No subas contraseñas, claves privadas, tokens ni el archivo `.env`**. Usa `.env.example` únicamente para documentar variables sin secretos.
 - Evita subir mazos privados, datos personales y archivos de las partidas.
-- No hagas cambios directamente en `main`: utiliza ramas y Pull Requests.
+- Publica todos los cambios directamente en `main`, respetando la política de un único contenedor y sin versiones paralelas.
 - Los cambios incorporados a `main` pueden terminar ejecutándose en la Raspberry: revisaremos especialmente los que afecten al servidor, Docker o scripts.
 - No compartas públicamente el enlace del juego ni su contraseña sin permiso del administrador.
 
 ## 🛠️ Administración del servidor
 
-El proyecto está desplegado en una Raspberry Pi 5 (`aarch64`) con Docker Compose. **Tailscale Funnel** proporciona el acceso HTTPS sin necesidad de comprar un dominio o abrir puertos del router. El servicio `commander` escucha solo en `127.0.0.1:3000` del anfitrión; no es necesario levantar el servicio opcional `caddy` cuando se usa Funnel.
+El proyecto está desplegado en una Raspberry Pi 5 (`aarch64`) con Docker Compose. **Tailscale Funnel** proporciona el acceso HTTPS sin necesidad de comprar un dominio o abrir puertos del router. El único contenedor de la aplicación, `mesa-commander` (servicio `commander`), escucha solo en `127.0.0.1:3000` del anfitrión. No se deben levantar contenedores adicionales para nuevas funciones ni versiones del juego.
 
 Desde la Raspberry:
 
@@ -121,7 +139,7 @@ systemctl list-timers --all mesa-commander-update.timer
 sudo journalctl -u mesa-commander-update.service -n 50 --no-pager
 ```
 
-La actualización utiliza una **clave SSH de despliegue de solo lectura** para consultar `origin/main`. La copia desplegada en la Raspberry no debe editarse directamente: los cambios se preparan en ramas de GitHub y se aprueban mediante Pull Requests.
+La actualización utiliza una **clave SSH de despliegue de solo lectura** para consultar `origin/main`. La copia desplegada en la Raspberry no debe editarse directamente: los cambios se publican directamente en `main` de GitHub.
 
 ### Limitaciones conocidas
 
