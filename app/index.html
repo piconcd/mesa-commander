@@ -2269,7 +2269,7 @@ function fullCost(c, s) {
   if (abOf(D(c)).altB13 && permsAll().filter(isCreature).length >= 13) return { generic: 0, pips: [['B']], x: 0, cre: false, is: true };
   if (abOf(D(c)).cmdFree && c.zone === 'hand' && controlsCommander(s)) return { generic: 0, pips: [], x: 0, cre: cost.cre, is: cost.is };
   if (c.overloaded && abOf(D(c)).overload) { const ov = abOf(D(c)).overload; cost.generic = ov.generic; cost.pips = ov.pips.map(p => p.slice()); }
-  if (c.zone === 'exile') { const g = (G.p[s].impulse || []).find(g => g.ids.includes(c.id)); if (g && g.anyMana) { cost.generic += cost.pips.length; cost.pips = []; } }
+  if (c.zone === 'exile') { const g = (G.p[s].impulse || []).find(g => g.ids.includes(c.id)); if (g && g.anyMana) { cost.generic += cost.pips.length; cost.pips = []; } if (g && g.alt) { cost.generic = g.alt.generic; cost.pips = g.alt.pips.map(p => p.slice()); cost.x = 0; c.xVal = 0; } }
   for (const x of permsOf(s)) for (const r of AB(x).costReduce) if ((!r.lvl || (x.level || 1) >= r.lvl) && typeMatchDef(D(c), r.f) && (!r.minP || basePT(D(c).power) >= r.minP)) cost.generic = Math.max(0, cost.generic - r.n);
   if (abOf(D(c)).undaunted) cost.generic = Math.max(0, cost.generic - oppsOf(s).length);
   for (const x of permsOf(s)) { const hr = AB(x).hornReduce; if (hr && x.chosenType && cost.cre && creTypes(D(c)).concat(abOf(D(c)).changeling ? [x.chosenType] : []).includes(x.chosenType)) cost.generic = Math.max(0, cost.generic - hr); }
@@ -14222,6 +14222,105 @@ const XPROMPT_T = {
   async oppPunish(op, pr, t) { if (!t || t.pl == null) return; __R(ME, G, await chRunAsync(CHGEN.oppPunish(pr.ctx.seat, Object.assign({}, op, { o: t.pl }), pr.ctx))); },
   async tuck(op, pr, t) { if (!t || t.zone !== 'bf') return; __R(ME, G, await chRunAsync(CHGEN.tuck(pr.ctx.seat, { tId: t.id }, pr.ctx))); }
 };
+
+/* =====================================================================
+   Avatar: The Last Airbender (TLA) — airbend, earthbend, firebending
+   Oracle reminder texts:
+   · Airbend: «Exile it. While it's exiled, its owner may cast it for {2} rather than its mana cost.»
+   · Earthbend N: «Target land you control becomes a 0/0 creature with haste that's still a land. Put N +1/+1
+     counters on it. When it dies or is exiled, return it to the battlefield tapped.»
+   · Firebending N: «Whenever a creature with firebending N attacks, add N {R}. This mana lasts until end of combat.»
+   Waterbend and «whenever you …bend» are not handled here yet.
+   ===================================================================== */
+function avSentence(t) {
+  let m;
+  if ((m = t.match(/^airbend (up to one )?(other |another )?target (nonland permanent|creature)( you control)?$/))) return [{ k: 'avAirbend', f: m[3], mine: !!m[4], other: !!m[2], upTo: !!m[1] }];
+  if ((m = t.match(/^(?:you )?earthbend (\d+|one|two|three|four|five|six)(?:, then earthbend (\d+|one|two|three|four|five|six))?$/))) return [m[1], m[2]].filter(Boolean).map(w => ({ k: 'avEarthbend', n: num(w) }));
+  if ((m = t.match(/^earthbend x, where x is the number of (forests you control|cards in your hand|creatures you control with power 4 or greater)$/))) return [{ k: 'avEarthbend', n: 0, nX: { 'forests you control': 'forests', 'cards in your hand': 'hand', 'creatures you control with power 4 or greater': 'pow4' }[m[1]] }];
+  return null;
+}
+// a text with airbend/earthbend is read sentence by sentence; if any sentence is not understood, nothing is (no half effects)
+{ const _pe = parseEffects; parseEffects = function (s) {
+  if (!/\b(?:air|earth)bend\b/.test(s || '')) return _pe(s);
+  const parts = String(s).trim().replace(/\.$/, '').split(/\.\s+/).map(p => p.trim()).filter(Boolean);
+  if (!parts.some(p => avSentence(p))) return _pe(s);
+  const out = [];
+  for (const p of parts) { const ops = avSentence(p) || _pe(p); if (!ops.length) return []; out.push(...ops); }
+  return out;
+}; }
+// «firebending N» (alone or in a keyword line) and «firebending X, where X is …»
+function avLine(a, l) {
+  const t = l.replace(/\.$/, '');
+  let m = t.match(/^firebending x, where x is (~'s power|the number of creatures you control)$/);
+  if (m) { a.attack.push({ k: 'avFire', n: m[1] === "~'s power" ? 'pow' : 'cre' }); return true; }
+  const parts = t.split(/,\s*/);
+  const fire = parts.map(p => p.match(/^firebending (\d+)$/)).filter(Boolean);
+  if (fire.length !== 1 || !parts.every(p => /^firebending \d+$/.test(p) || KW_LIST.includes(p))) return false;
+  parts.forEach(p => { if (KW_LIST.includes(p)) a.kw.add(p); });
+  a.attack.push({ k: 'avFire', n: +fire[0][1] });
+  return true;
+}
+{ const _el = eoeLine; eoeLine = function (a, l, PE) { if (avLine(a, l)) return true; return _el(a, l, PE); }; }
+function avAirOk(op, ctx, x) {
+  const c = x && x.card; if (!c || c.zone !== 'bf') return false;
+  const src = ctx.src ? (G.cards[ctx.src.id] || ctx.src) : null; const mine = c.ctl === ctx.seat;
+  if (op.mine && !mine) return false;
+  if (op.other && src && c.id === src.id) return false;
+  if (hasKw(c, 'shroud') || (!mine && hasKw(c, 'hexproof'))) return false;
+  return op.f === 'creature' ? isCreature(c) : !isLand(c);
+}
+function avEarthOk(op, ctx, x) { const c = x && x.card; return !!(c && c.zone === 'bf' && c.ctl === ctx.seat && isLand(c) && !hasKw(c, 'shroud')); }
+EOE_TGT.avAirbend = { valid: avAirOk, target: (op, ctx) => {
+  const all = permsAll().filter(c => avAirOk(op, ctx, { card: c }));
+  if (op.mine) { const b = bestBy(all, c => (D(c).cmc || 0) + value(c) * 0.1); return b && (!op.upTo || (D(b).cmc || 0) > 2) ? b : null; }
+  return bestBy(all.filter(c => c.ctl !== ctx.seat), c => value(c)) || (op.upTo ? null : bestBy(all, c => -value(c)));
+} };
+EOE_TGT.avEarthbend = { valid: avEarthOk, target: (op, ctx) => bestBy(permsOf(ctx.seat).filter(c => avEarthOk(op, ctx, { card: c })), c => (c.avEarth ? 10 : 0) + (c.tapped ? 1 : 0) + Math.random() * 0.1) };
+Object.assign(XOPS, {
+  avAirbend(op, ctx, t) {
+    if (!t || t.zone !== 'bf') return;
+    const o = t.owner; const tok = !!t.token; const name = cn(t);
+    moveCard(t, 'exile');
+    if (!tok && t.zone === 'exile') { (G.p[o].impulse || (G.p[o].impulse = [])).push({ ids: [t.id], left: 9999, alt: { generic: 2, pips: [] }, src: 'Airbend' }); log(`${name} sale despedida por el aire: ${pn(o)} puede lanzarla desde el exilio por {2}.`); }
+    else log(`${name} sale despedida por el aire.`);
+  },
+  avEarthbend(op, ctx, t) {
+    if (!t || t.zone !== 'bf' || !isLand(t)) return;
+    const s = ctx.seat;
+    const n = op.nX === 'forests' ? permsOf(s).filter(c => isLand(c) && /\bforest\b/i.test(D(c).type_line || '')).length : op.nX === 'hand' ? G.p[s].hand.length : op.nX === 'pow4' ? permsOf(s).filter(c => isCreature(c) && P(c) >= 4).length : op.n;
+    t.animated = true; t.setBase = [0, 0]; t.avEarth = true;
+    if (!(t.addTypes || []).includes('Creature')) (t.addTypes ||= []).push('Creature');
+    if (!(t.tkwPerm || []).includes('haste')) t.tkwPerm = [...(t.tkwPerm || []), 'haste'];
+    if (n > 0) addCounters(t, n, 'p1', true);
+    recomputeMods();
+    log(`${pn(s)} hace tierra-control: ${cn(t)} es una criatura 0/0 con prisa${n > 0 ? ` y ${n} contador${n > 1 ? 'es' : ''} +1/+1` : ''}.`);
+  },
+  avFire(op, ctx) {
+    const s = ctx.seat; const src = ctx.src ? (G.cards[ctx.src.id] || ctx.src) : null;
+    const n = op.n === 'pow' ? (src && src.zone === 'bf' ? Math.max(0, P(src)) : 0) : op.n === 'cre' ? permsOf(s).filter(isCreature).length : op.n;
+    if (!(n > 0)) return;
+    const p = G.p[s]; p.pool = p.pool || [];
+    for (let i = 0; i < n; i++) p.pool.push({ src: -1, cols: ['R'], cre: false, avCombat: true });
+    log(`${src ? cn(src) : pn(s)}: fuego-control, ${pn(s)} añade ${'{R}'.repeat(n)} hasta el final del combate.`);
+  }
+});
+Object.assign(XTEXT, {
+  avAirbend: o => { const fem = o.f === 'creature'; return `Airbend: exiliar ${o.upTo ? 'hasta ' : ''}${o.other ? (fem ? 'otra' : 'otro') : (fem ? 'una' : 'un')} ${fem ? 'criatura' : 'permanente no tierra'}${o.mine ? (fem ? ' tuya' : ' tuyo') : ''}; su dueño puede lanzarlo por {2}`; },
+  avEarthbend: o => `Earthbend ${o.nX ? 'X' : o.n}: una tierra tuya es criatura 0/0 con prisa y contadores +1/+1; si muere o se exilia, vuelve girada`,
+  avFire: o => `Firebending ${o.n === 'pow' ? 'X (su fuerza)' : o.n === 'cre' ? 'X (tus criaturas)' : o.n}: añade {R} hasta el final del combate`
+});
+// an earthbent land that dies or is exiled returns to the battlefield tapped
+{ const _mv = moveCard; moveCard = function (c, to, opts) {
+  const was = c && c.zone; const earth = !!(c && c.avEarth && was === 'bf');
+  const r = _mv.apply(this, arguments);
+  if (earth && c.zone !== 'bf') {
+    c.avEarth = false; const z = c.zone;
+    if ((z === 'gy' || z === 'exile') && !c.token) setTimeout0(() => { if (c.zone === z && G.cards[c.id] === c) { moveCard(c, 'bf', { ctl: c.owner }); c.tapped = true; log(`${cn(c)} vuelve al campo girada (earthbend).`); } });
+  }
+  return r;
+}; }
+// firebending mana only lasts until end of combat
+{ const _ac = ewAfterCombat; ewAfterCombat = function (s) { for (const p of G.p) if (p.pool && p.pool.some(u => u.avCombat)) p.pool = p.pool.filter(u => !u.avCombat); return _ac.apply(this, arguments); }; }
 
 </script>
 
