@@ -14669,6 +14669,140 @@ XTEXT.cdMay = op => `Puedes ${cdCostText(op.cost)}. Si lo haces: ` + op.ops.map(
 { const _ex = eoeX; eoeX = function (op, ctx) { if (op && op.cnd) { if (!cdOk(op.cnd, ctx)) return { k: 'noop' }; op = Object.assign({}, op); delete op.cnd; } return _ex(op, ctx); }; }
 { const _ot = opText; opText = function (op) { const t = _ot(op && op.cnd ? Object.assign({}, op, { cnd: undefined }) : op); if (!op || !op.cnd) return t; const c = op.cnd.not ? op.cnd.not : op.cnd; return `${op.cnd.not ? 'Si NO' : 'Si'} se cumple «${esc(c.text || '')}»: ${t}`; }; }
 
+/* =====================================================================
+   The Lord of the Rings / The Hobbit (tanda 7)
+   · «Whenever you scry, …» (CR 701.22): only scry, not surveil; scry 0 is no scry (701.22c);
+     «each card looked at while scrying this way» = min(N, cards in the library).
+   · «Whenever the Ring tempts you, [if you chose a creature other than ~ as your Ring-bearer,] …»,
+     «whenever you choose a creature as your Ring-bearer» (CR 701.54), «when the Ring tempts you, return
+     this card from your graveyard to your hand», «if you don't control a Ring-bearer, the Ring tempts you».
+   · «Whenever a Goblin or Orc / an Army you control deals combat damage to a player, …».
+   · «When ~ enters or leaves the battlefield, …».
+   · «Target creature gets … . If it's legendary / a Goblin or Orc, it also gains …» and
+     «… Then if that creature has power N or greater, it gains …», «If that creature is legendary,
+     its controller loses N life»: the rider looks at the same target when the spell resolves.
+   If any sentence of the effect is not understood, the line stays unrecognised (no half effects).
+   ===================================================================== */
+const L7_LOOKED = ', where x is the number of cards looked at while scrying this way';
+// every sentence must be understood on its own (except «you may <cost>. if you do, …», read as a whole by the
+// condition layer, and «exile the top card of your library. you may play that card this turn» = impulse).
+// Effects that start with their own «if …» or make a choice («choose one …») are left to the other parsers.
+// Probing uses parseEffects, not the recording PE, so a failed probe does not show up as «no reconocido».
+function l7Safe(eff, ops) {
+  if (!ops || !ops.length || /^if /.test(eff) || /\bchoose\b/.test(eff) || ops.some(o => o.k === 'mode')) return false;
+  if (/\bif you do\b/.test(eff)) return ops.some(o => o.k === 'cdMay');
+  if (/^exile the top card of your library\. you may play that card this turn$/.test(eff)) return ops.length === 1 && ops[0].k === 'impulse';
+  return cdSplit(eff).every(p => parseEffects(p).length > 0);
+}
+function l7ScryOps(eff) {
+  const PE = parseEffects;
+  let m;
+  if ((m = eff.match(/^~ gets \+(\d+)\/\+(\d+) until end of turn and can't be blocked this turn$/))) return { ops: [{ k: 'selfPump', p: +m[1], t: +m[2] }, { k: 'selfUnblock' }] };
+  if (/^~ gets \+1\/\+1 until end of turn for each card looked at while scrying this way$/.test(eff)) return { per: true, ops: [] };
+  if (/^if ~ is tapped, you may untap it\. do this only once each turn$/.test(eff)) return { ops: [{ k: 'l7UntapSelfMay' }] };
+  if (/^you may reveal the top card of your library\. if a land card is revealed this way, put it onto the battlefield tapped$/.test(eff)) return { ops: [{ k: 'l7TopLand' }] };
+  if (eff.endsWith(L7_LOOKED)) { const ops = PE(eff.slice(0, -L7_LOOKED.length)); return ops.length === 1 && ops[0].k === 'counterMulti' && ops[0].upTo === 'x' ? { ops } : null; }
+  if (/\bx\b/.test(eff)) return null;
+  const ops = PE(eff); return l7Safe(eff, ops) ? { ops } : null;
+}
+function l7Line(a, l) {
+  let m; const t = l.replace(/\.$/, ''); const PE = parseEffects;
+  if ((m = t.match(/^whenever you scry, (.+?)(\. this ability triggers only once each turn)?$/))) {
+    const r = l7ScryOps(m[1]); if (!r) return false; const once = !!m[2];
+    return x26Trig(a, { ev: 'l7scry', who: 'you', run: (x, info) => {
+      if (once && !x26TurnOnce(x, 'l7scry')) return;
+      const n = info.n || 0; const ops = r.per ? (n ? [{ k: 'selfPump', p: n, t: n }] : []) : r.ops;
+      trigger(x, ops, { amount: n });
+    } });
+  }
+  if ((m = t.match(/^whenever the ring tempts you, (if you chose a creature other than ~ as your ring-bearer, )?(.+)$/))) {
+    const ops = PE(m[2]); if (!l7Safe(m[2], ops)) return false; const other = !!m[1];
+    return x26Trig(a, { ev: 'tempt', who: 'you', run: (x, info) => { if (other && (!info.c || info.c.id === x.id)) return; trigger(x, ops); } });
+  }
+  if ((m = t.match(/^whenever you choose a creature as your ring-bearer, (.+)$/))) {
+    const ops = PE(m[1]); if (!l7Safe(m[1], ops)) return false;
+    return x26Trig(a, { ev: 'tempt', who: 'you', run: (x, info) => { if (info.c) trigger(x, ops); } });
+  }
+  if (/^when(?:ever)? the ring tempts you, return ~ from your graveyard to your hand$/.test(t)) { a.l7RingGy = true; return true; }
+  if (/^a deck can have up to (?:seven|nine) cards named ~$/.test(t)) return true; // deck building only (CR 100.2a)
+  if ((m = t.match(/^whenever an? ([a-z]+)(?: or ([a-z]+))? you control deals combat damage to a player, (.+)$/)) && !['creature', 'nontoken', 'artifact', 'token'].includes(m[1])) {
+    const ops = PE(m[3]); if (!l7Safe(m[3], ops)) return false;
+    a.allyCombatDmg.push({ sub: [m[1], m[2]].filter(Boolean).join('|'), ops }); return true;
+  }
+  if ((m = t.match(/^when(?:ever)? ~ enters or leaves the battlefield, (.+)$/))) {
+    const ops = PE(m[1]); if (!l7Safe(m[1], ops)) return false;
+    a.etb.push(...ops); a.ltb.push(...ops.map(o => Object.assign({}, o))); return true;
+  }
+  return false;
+}
+{ const _el = eoeLine; eoeLine = function (a, l, PE) { if (l7Line(a, l)) return true; return _el(a, l, PE); }; }
+// whole sentences
+function l7Sentence(s, pe) {
+  let m;
+  if (/^if you don't control a ring-bearer, the ring tempts you$/.test(s)) return [{ k: 'l7TemptNoRB' }];
+  if ((m = s.match(/^put a \+1\/\+1 counter on each ([a-z]+) you control$/)) && !['creature', 'other', 'permanent', 'artifact', 'land'].includes(m[1])) return [{ k: 'x26CtrEach', n: 1, f: m[1] }];
+  const one = txt => { const o = pe(txt); return o.length === 1 && ['pumpT', 'shrinkT'].includes(o[0].k) ? Object.assign({}, o[0], { l7mark: true }) : null; };
+  if ((m = s.match(/^(.+?)\. if (?:it's|it is|that creature is) (legendary|an? [a-z]+(?: or [a-z]+)?), it (?:also )?gains ([a-z ,]+?) until end of turn$/))) {
+    const first = one(m[1]); const kws = kwList(m[3]); if (!first || first.k !== 'pumpT' || !kws.length || kws.join(' and ') !== m[3].replace(/, /g, ' and ')) return null;
+    return [first, { k: 'l7IfTgt', f: m[2].replace(/^an? /, '').split(' or '), kws, text: m[2] }];
+  }
+  if ((m = s.match(/^(.+?)\. then if that creature has power (\d+) or greater, it gains ([a-z ]+?) until end of turn$/))) {
+    const first = one(m[1]); const kws = kwList(m[3]); if (!first || first.k !== 'pumpT' || kws.length !== 1 || kws[0] !== m[3]) return null;
+    return [first, { k: 'l7IfTgt', powMin: +m[2], kws, text: `fuerza ${m[2]} o más` }];
+  }
+  if ((m = s.match(/^(.+?)\. if that creature is legendary, its controller loses (\d+) life$/))) {
+    const first = one(m[1]); if (!first) return null;
+    return [first, { k: 'l7IfTgt', f: ['legendary'], lose: +m[2], text: 'legendary' }];
+  }
+  return null;
+}
+{ const _pe = parseEffects; parseEffects = function (s) { const r = typeof s === 'string' ? l7Sentence(s.trim().replace(/\.$/, ''), _pe) : null; return r || _pe(s); }; }
+// remember the target of the first op, for the rider (pumpT already does it)
+{ const _ao = applyOp; applyOp = function (op, ctx, t) { const r = _ao.apply(this, arguments); if (op && op.l7mark && t && t.id != null && ctx) ctx.lastTgt = t.id; return r; }; }
+// scry events
+function l7ScryEv(s, n) { if (G && G.p[s] && n > 0) fxEv('l7scry', { s, ctl: s, n }); }
+{ const _bs = botScry; botScry = function (s, n, surveil) { const L = G && G.p[s] ? G.p[s].lib.length : 0; const r = _bs(s, n, surveil); if (!surveil) l7ScryEv(s, Math.min(n, L)); return r; }; }
+{ const _ps = pickScry; pickScry = async function (s, n, surveil) { const L = G && G.p[s] ? G.p[s].lib.length : 0; const r = __R(ME, G, await _ps(s, n, surveil)); if (!surveil) l7ScryEv(s, Math.min(n, L)); return r; }; }
+// «when the Ring tempts you, return this card from your graveyard to your hand» (Ringwraiths)
+{ const _lt = lotrTempt; lotrTempt = function (s, c) {
+  const r = _lt(s, c);
+  try { if (G && G.p[s]) for (const id of G.p[s].gy.slice()) { const g = G.cards[id]; if (g && g.zone === 'gy' && abOf(D(g)).l7RingGy) trigger(g, [{ k: 'x26ReturnSelfGy', to: 'hand' }]); } } catch (e) { console.error(e); }
+  return r;
+}; }
+function l7TgtOk(op, c) {
+  if (!c) return false;
+  if (op.f && !op.f.some(f => f === 'legendary' ? fxLegendary(c) : fxIs(c, [f]))) return false;
+  if (op.powMin && !(c.zone === 'bf' && P(c) >= op.powMin)) return false;
+  return true;
+}
+function l7UntapSelf(c) { if (!c || c.zone !== 'bf' || !c.tapped) return false; if (!x26TurnOnce(c, 'l7untap')) return false; c.tapped = false; log(`${cn(c)} se endereza.`); return true; }
+function l7TopLand(s, src) {
+  const lib = G.p[s].lib; if (!lib.length) return; const c = G.cards[lib[0]];
+  log(`${src ? cn(src) + ': ' : ''}${pn(s)} muestra la primera carta de su biblioteca: ${cn(c)}.`);
+  if (isLand(c)) { moveCard(c, 'bf', { ctl: s, tapped: true }); log(`${cn(c)} es una tierra: entra en el campo de batalla girada.`, 'good'); }
+}
+Object.assign(XOPS, {
+  l7TemptNoRB(op, ctx) { if (fxRB(ctx.seat)) { log(`${pn(ctx.seat)} ya tiene un Portador del Anillo: el Anillo no le tienta.`); return; } XOPS.fxTempt(op, ctx); },
+  l7IfTgt(op, ctx) {
+    const c = ctx.lastTgt != null ? G.cards[ctx.lastTgt] : null; if (!l7TgtOk(op, c)) return;
+    if (op.kws && c.zone === 'bf') { c.tkw.push(...op.kws); log(`${cn(c)} (${op.text}) también gana ${op.kws.map(k => KW_ES[k] || k).join(' y ')} hasta el final del turno.`); }
+    if (op.lose) { const o = c.ctl; if (G.p[o] && alive(o)) { loseLife(o, op.lose); log(`${cn(c)} es legendaria: ${pn(o)} pierde ${op.lose} vidas.`, 'bad'); } }
+  },
+  l7UntapSelfMay(op, ctx) { l7UntapSelf(lotrSrc(ctx)); },
+  l7TopLand(op, ctx) { l7TopLand(ctx.seat, lotrSrc(ctx)); }
+});
+Object.assign(XPROMPT, {
+  async l7TemptNoRB(op, pr) { if (fxRB(pr.ctx.seat)) { log(`${pn(pr.ctx.seat)} ya tiene un Portador del Anillo: el Anillo no le tienta.`); return; } __R(ME, G, await XPROMPT.fxTempt(op, pr)); },
+  async l7UntapSelfMay(op, pr) { const c = lotrSrc(pr.ctx); if (!c || c.zone !== 'bf' || !c.tapped || (c.x26u || {})['l7untap@' + G.turnsTaken]) return; if (__R(ME, G, await askYesNo(pr.title, `¿Enderezar ${cn(c)}?`))) l7UntapSelf(c); },
+  async l7TopLand(op, pr) { if (!G.p[pr.ctx.seat].lib.length) return; if (__R(ME, G, await askYesNo(pr.title, '¿Mostrar la primera carta de tu biblioteca? Si es una tierra, entra en el campo de batalla girada.'))) l7TopLand(pr.ctx.seat, lotrSrc(pr.ctx)); }
+});
+Object.assign(XTEXT, {
+  l7TemptNoRB: () => 'Si no tienes Portador del Anillo, el Anillo te tienta',
+  l7IfTgt: o => `Si la criatura es ${o.text}: ${o.kws ? 'gana ' + o.kws.map(k => KW_ES[k] || k).join(' y ') : ''}${o.lose ? 'su controlador pierde ' + o.lose + ' vidas' : ''}`,
+  l7UntapSelfMay: () => 'Si está girada, puedes enderezarla (una vez por turno)',
+  l7TopLand: () => 'Puedes mostrar la primera carta de tu biblioteca; si es una tierra, entra girada'
+});
+
 </script>
 
 <script src="/config.js"></script>
