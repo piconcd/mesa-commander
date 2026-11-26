@@ -18,6 +18,7 @@ const typeMatchDef = new Function('COLORWORD', slice('function wordForms(w) {', 
 const W = {};
 const lib = new Function('W', 'num', 'typeMatchDef', 'esES', 'esc', `
   let G = null, permsOf, oppsOf, P, T, D, isLand, isCreature, x26CreIn; const XOPS = {}, XPROMPT = {}, XTEXT = {};
+  let castSpell = async () => {}, resolveSpell = () => {}, moveCard = () => {};
   ${block}
   W.set = o => { ({ G, permsOf, oppsOf, P, T, D, isLand, isCreature, x26CreIn } = o); };
   return { cdParse, cdCond, cdOk, cdCost, cdClause };`)(W, num, typeMatchDef, x => x, x => x);
@@ -91,7 +92,7 @@ test('conditions are checked when the effect happens', () => {
   G.p[0].gy.push(50);
   assert.equal(ok('there\'s a lesson card in your graveyard'), true);
   assert.equal(lib.cdOk({ not: lib.cdCond('you control a wizard') }, { seat: 0 }), false);
-  assert.equal(lib.cdCond('this spell was kicked'), null);
+  assert.equal(lib.cdCond('you attacked this turn'), null);
 });
 
 test('the engine checks the condition before each effect, also for human players', () => {

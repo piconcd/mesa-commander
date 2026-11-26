@@ -4332,7 +4332,7 @@ async function castSpell(s, c, opts = {}) {
     const a = AB(x);
     if (x.ctl === s && nonCre && hasKw(x, 'prowess')) { x.tp += 1; x.tt += 1; }
     if (x.ctl === s && nonCre) for (const tr of a.castSelfNC) if ((!tr.min || (c.manaSpent || 0) >= tr.min) && (!tr.mv || (d.cmc || 0) >= tr.mv)) trigger(x, tr.ops, { amount: d.cmc || 0 });
-    if (x.ctl === s && isIS && a.castSelfIS.length) trigger(x, a.castSelfIS, { amount: d.cmc || 0 });
+    if (x.ctl === s && isIS && a.castSelfIS.length) trigger(x, a.castSelfIS, { amount: d.cmc || 0, spent: c.cdSpent });
     if (isIS && a.castAnyIS.length) trigger(x, a.castAnyIS, { that: s });
     if (nonCre && a.castNonCre.length) trigger(x, a.castNonCre, { that: s });
     if (x.ctl !== s && a.oppCasts.length) trigger(x, a.oppCasts, { that: s });
@@ -14422,7 +14422,7 @@ function cdSplit(s) {
 // one sentence → { c: condition, e: effect alone, stripped: the sentence without its condition, instead }
 function cdClause(t) {
   const m = cdMask(t); if (!/\bif\b/.test(m) || CD_SKIP.test(m)) return null;
-  const tidy = e => e.replace(/^then /, '').replace(/,? instead$/, '').trim();
+  const tidy = e => e.replace(/^then /, '').replace(/,? instead$/, '').replace(/^also /, '').replace(/^(~|it|that creature) also /, '$1 ').trim();
   let q = m.match(/^(then )?if ([^,"]+), (instead )?/);
   if (q) { const rest = t.slice(q[0].length); return { c: q[2].trim(), e: tidy(rest), stripped: (q[1] || '') + (q[3] || '') + rest, instead: !!q[3] || /,? instead$/.test(rest) }; }
   q = m.match(/^(.+),? (instead )?if ([^,"]+)$/);
@@ -14458,6 +14458,14 @@ function cdCond(c) {
   if ((m = c.match(/^~ has (\w+) or more ([a-z]+|\+1\/\+1) counters on it$/)) || (m = c.match(/^there are (\w+) or more ([a-z]+|\+1\/\+1) counters on (?:~|her|him)$/))) return { k: 'srcCtr', n: cdNum(m[1]), kind: m[2] === '+1/+1' ? 'p1' : m[2], text: T };
   if ((m = c.match(/^(?:~'s|her|his) power is (\d+) or greater$/))) return { k: 'srcPow', n: +m[1], text: T };
   if ((m = c.match(/^~ is an? ([a-z]+)$/))) return { k: 'srcIs', f: m[1], text: T };
+  // how the spell (or the permanent that entered) was cast — see «How a spell was cast» below
+  if (/^this spell was kicked$|^this spell was cast using teamwork$|^this spell's additional cost was paid$/.test(c)) return { k: 'kicked', text: T };
+  if (/^this spell was cast from a graveyard$/.test(c)) return { k: 'fromGy', text: T };
+  if (/^this spell wasn't cast from your hand$|^this spell was cast from anywhere other than your hand$/.test(c)) return { k: 'notHand', text: T };
+  if (/^you cast it$|^(?:he|she|it|they|~) (?:was|were) cast$/.test(c)) return { k: 'castEnt', text: T };
+  if (/^it was cast from your graveyard$/.test(c)) return { k: 'castEnt', gy: true, text: T };
+  if (/^(?:this spell's|this creature's|his|her|its|~'s) sneak cost was paid$/.test(c)) return { k: 'sneak', text: T };
+  if ((m = c.match(/^(\w+) or more mana was spent to cast that spell$/)) && cdNum(m[1]) > 0) return { k: 'spent', n: cdNum(m[1]), text: T };
   return null;
 }
 function cdType(d, phrase, card) { return !phrase || phrase.split(/,? (?:and\/or|or) /).some(part => part.split(/\s+/).filter(Boolean).every(w => typeMatchDef(d, w, card))); }
@@ -14482,6 +14490,12 @@ function cdOk(sp, ctx) {
     case 'srcCtr': return !!src && ((src.cnt || {})[sp.kind] || 0) >= sp.n;
     case 'srcPow': return !!src && src.zone === 'bf' && P(src) >= sp.n;
     case 'srcIs': return !!src && cdType(D(src), sp.f, src);
+    case 'kicked': return !!ctx.kicked;
+    case 'fromGy': return !!src && !!src.castFromGy;
+    case 'notHand': return !!src && src.cdFrom != null && src.cdFrom !== 'hand';
+    case 'castEnt': return !!src && !!src.cdEnt && (!sp.gy || !!src.cdEnt.gy);
+    case 'sneak': return !!src && (src.zone === 'bf' ? !!(src.cdEnt && src.cdEnt.sneak) : !!src.cdSneak);
+    case 'spent': return typeof ctx.spent === 'number' && ctx.spent >= sp.n;
   }
   return false;
 }
@@ -14493,7 +14507,10 @@ function cdParse(s, pe) {
   const J = x => JSON.stringify(x); const rj = J(r);
   if (J(pe(sents.join('. '))) !== rj) return r;
   const out = r.map(o => Object.assign({}, o)); const used = new Set(); const late = new Set(); const drop = new Set(); const add = [];
-  const take = (ops, cnd, i) => { for (const o of ops) { const k = J(o); const j = r.findIndex((x, n) => !used.has(n) && J(x) === k); if (j < 0) return false; used.add(j); if (cnd === 'drop') drop.add(j); else out[j].cnd = cnd; if (i > 0) late.add(j); } return true; };
+  // 'keep' only checks the effect is there: same kind and amount (a sentence alone may be read by another rule: x26Dmg ≈ dmg)
+  const AL = { x26Dmg: 'dmg', fxSelfCtr: 'selfCtrKind' }; const LK = x => (AL[x.k] || x.k) + '|' + (x.n != null ? x.n : '') + '|' + (x.kind || '');
+  const take = (ops, cnd, i) => { for (const o of ops) { const k = cnd === 'keep' ? LK(o) : J(o); const j = r.findIndex((x, n) => !used.has(n) && (cnd === 'keep' ? LK(x) : J(x)) === k); if (j < 0) return false; used.add(j); if (cnd === 'keep') continue; if (cnd === 'drop') drop.add(j); else out[j].cnd = cnd; if (i > 0) late.add(j); } return true; };
+  const xs = new Set(); let lost = false;
   for (let i = 0; i < sents.length; i++) {
     const cl = cls[i]; if (!cl) continue;
     const alt = sents.slice(); alt[i] = cl.stripped;
@@ -14504,17 +14521,41 @@ function cdParse(s, pe) {
       if (!cost || !opsE.length || opsE.some(o => o.k === 'mode')) return [];
       const opsX = pe(sents[i - 1]);
       if (!take(opsE, 'drop', i) || (opsX.length && !take(opsX, 'drop', i))) return [];
-      add.push({ k: 'cdMay', cost, ops: opsE });
+      add.push({ k: 'cdMay', cost, ops: opsE }); xs.add(i - 1); lost = true;
       continue;
     }
+    lost = true;
     const spec = cl.c ? cdCond(cl.c) : null;
     if (!spec || !cl.e || cl.e.includes('"')) return []; // a granted ability in quotes is not read here
-    const opsE = pe(cl.e); if (!opsE.length || !take(opsE, spec, i)) return [];
-    if (cl.instead) { if (i === 0 || cls[i - 1]) return []; const opsX = pe(sents[i - 1]); if (!opsX.length || !take(opsX, { not: spec, text: spec.text }, i)) return []; }
+    const opsE = pe(cl.e); if (!opsE.length || !take(opsE, spec, i)) return cdBySentence(sents, cls, pe);
+    if (cl.instead) { if (i === 0 || cls[i - 1]) return []; xs.add(i - 1); const opsX = pe(sents[i - 1]); if (!opsX.length || !take(opsX, { not: spec, text: spec.text }, i)) return cdBySentence(sents, cls, pe); }
   }
+  // the sentences without a condition must still be there (the old parser sometimes kept only one of two damages)
+  if (lost) for (let i = 0; i < sents.length; i++) { if (cls[i] || xs.has(i)) continue; const o = pe(sents[i]); if (!o.length || cdLosesLimit(sents[i], o)) return []; if (!take(o, 'keep', i)) return cdBySentence(sents, cls, pe); }
   // what a later sentence checks happens after the sentences before it (counters, life…)
   const keep = (o, j) => !drop.has(j);
   return [...out.filter((o, j) => keep(o, j) && !late.has(j)), ...add, ...out.filter((o, j) => keep(o, j) && late.has(j))];
+}
+// «… with mana value 2 or less» / «with power 4 or greater» read without that limit (the old counter rule did that)
+function cdLosesLimit(txt, ops) {
+  const m = txt.match(/\bwith (?:mana value|power|toughness) \w+ or (?:less|greater)\b/); if (!m) return false;
+  const k = m[0].slice(5);
+  return !ops.some(x => Object.values(x).some(v => typeof v === 'string' && v.includes(k)));
+}
+// second way: read each sentence on its own («draw a card. if …, draw two cards instead»). Only when no sentence
+// after the first points back to another one («that creature», «it»…), and every sentence is understood.
+function cdBySentence(sents, cls, pe) {
+  const out = [];
+  for (let i = 0; i < sents.length; i++) {
+    const cl = cls[i]; const txt = cl ? cl.e : sents[i];
+    if (!txt || txt.includes('"') || (i > 0 && /\b(?:that|those|them|they|it|its|their)\b/.test(txt))) return [];
+    if (!cl) { const o = pe(txt); if (!o.length || cdLosesLimit(txt, o)) return []; out.push(o.map(x => Object.assign({}, x))); continue; }
+    const spec = cl.c && cl.c !== 'you do' ? cdCond(cl.c) : null; if (!spec) return [];
+    const o = pe(txt); if (!o.length || cdLosesLimit(txt, o)) return [];
+    if (cl.instead) { if (i === 0 || cls[i - 1]) return []; out[i - 1] = out[i - 1].map(x => Object.assign(x, { cnd: { not: spec, text: spec.text } })); }
+    out.push(o.map(x => Object.assign({}, x, { cnd: spec })));
+  }
+  return out.flat();
 }
 // the optional cost before «if you do»; null if it isn't one of these
 function cdCost(t) {
@@ -14603,6 +14644,27 @@ Object.assign(XPROMPT, {
   }
 });
 XTEXT.cdMay = op => `Puedes ${cdCostText(op.cost)}. Si lo haces: ` + op.ops.map(opText).join(', ');
+/* ---------- How a spell was cast (for «if this spell was kicked / cast from a graveyard / if you cast it…») ----------
+   · kicker, teamwork and optional additional costs already leave c.kicked → ctx.kicked when the spell resolves;
+   · c.castFromGy is set by castSpell; here also the zone it was cast from (c.cdFrom), whether it was cast with
+     sneak (c.cdSneak) and the mana spent (c.cdSpent, same count as the x26 block: total cost + X, 0 if free);
+   · a permanent spell remembers it on the battlefield (c.cdEnt) until it enters again some other way (CR 400.7);
+   · «whenever you cast an instant or sorcery spell» triggers get ctx.spent (opus). */
+{ const _cs6 = castSpell; castSpell = async function (s, c, opts = {}) {
+  if (G && c) {
+    c.cdFrom = c.zone; c.cdSneak = !!(opts.free && c.x26Spent != null);
+    try { c.cdSpent = opts.free ? (c.x26Spent != null ? c.x26Spent : 0) : x26TotalCost(fullCost(c, s)) + (c.xVal || 0); } catch (e) { c.cdSpent = D(c).cmc || 0; }
+  }
+  return _cs6(s, c, opts);
+}; }
+{ const _rs6 = resolveSpell; resolveSpell = function (s, c, pre, botOps, respTo) {
+  if (c && isPermDef(D(c))) c.cdPend = { gy: !!c.castFromGy, from: c.cdFrom || null, sneak: !!c.cdSneak, kicked: !!c.kicked, spent: c.cdSpent || 0 };
+  return _rs6(s, c, pre, botOps, respTo);
+}; }
+{ const _mc6 = moveCard; moveCard = function (c, to, opts) {
+  if (c && to === 'bf' && c.zone !== 'bf') { c.cdEnt = c.cdPend || null; c.cdPend = null; }
+  return _mc6(c, to, opts);
+}; }
 { const _pe = parseEffects; parseEffects = function (s) { return cdParse(s, _pe); }; }
 { const _ex = eoeX; eoeX = function (op, ctx) { if (op && op.cnd) { if (!cdOk(op.cnd, ctx)) return { k: 'noop' }; op = Object.assign({}, op); delete op.cnd; } return _ex(op, ctx); }; }
 { const _ot = opText; opText = function (op) { const t = _ot(op && op.cnd ? Object.assign({}, op, { cnd: undefined }) : op); if (!op || !op.cnd) return t; const c = op.cnd.not ? op.cnd.not : op.cnd; return `${op.cnd.not ? 'Si NO' : 'Si'} se cumple «${esc(c.text || '')}»: ${t}`; }; }
