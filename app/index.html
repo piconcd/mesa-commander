@@ -2141,6 +2141,20 @@ function backKey(c) {
   if (!G.defs[b.name]) G.defs[b.name] = b;
   return b.name;
 }
+/* «Transform ~» (rule 701.28): the permanent turns over in place. It stays the same object: it keeps its
+   counters, damage, tapped state and attachments, and it can go back from its back face to its front face.
+   Then the face it turned into triggers its «whenever ~ transforms into ~» abilities. */
+function tfOnBack(c) { return !!(c && c.front && G.defs[c.front] && backKey(Object.assign({}, c, { n: c.front })) === c.n); }
+function tfInPlace(c) {
+  if (!c || c.zone !== 'bf') return false;
+  const was = cn(c);
+  if (tfOnBack(c)) { c.n = c.front; c.front = null; }
+  else { if (c.front) return false; const bk = backKey(c); if (!bk) return false; c.front = c.n; c.n = bk; }
+  recomputeMods();
+  log(`${was} se transforma en ${cn(c)}.`, 't');
+  const on = AB(c).x26OnTf; if (on && on.length) trigger(c, on);
+  return true;
+}
 function trigMult(src) {
   if (!src || src.ctl == null || !G.defs[src.n]) return 1;
   const tl = (D(src).type_line || '').toLowerCase(); if (!/\b(shaman|wizard)\b/.test(tl) || !/creature/.test(tl)) return 1;
@@ -2180,7 +2194,7 @@ function drawCards(s, n = 1, silent) {
   return drawn;
 }
 function gainLife(s, n) {
-  if (n <= 0 || G.p[s].dead) return false;
+  if (!(n > 0) || G.p[s].dead) return false;
   if (G.p[s].lifeLock === G.turnsTaken) { log(`La vida de ${pn(s)} no puede cambiar este turno.`); return false; }
   if (oppsOf(s).some(o => permsOf(o).some(x => AB(x).remedy))) { log(`Tainted Remedy: ${pn(s)} pierde ${n} vidas en vez de ganarlas.`, 'bad'); loseLife(s, n); return false; }
   { const k = permsOf(s).filter(x => AB(x).gainDouble).length; if (k) n *= Math.pow(2, k); }
@@ -3771,6 +3785,7 @@ function applyOp(op, ctx, t) {
     case 'sagaEnd': { const c = src ? G.cards[src.id] : null; if (c && c.zone === 'bf' && AB(c).saga && (c.cnt.lore || 0) >= AB(c).saga.max) { log(`${cn(c)} termina su último capítulo y se sacrifica.`); moveCard(c, 'gy'); } break; }
     case 'transform': {
       const c = src ? G.cards[src.id] : null; if (!c || c.zone !== 'bf') break;
+      if (op.inPlace) { tfInPlace(c); break; }
       const bk = backKey(c); if (!bk) { log(`${cn(c)}: no tengo los datos de su otra cara; transfórmala a mano.`); break; }
       const own = c.owner; const front = c.n; moveCard(c, 'exile');
       log(`${G.defs[front].name} se exilia y vuelve transformada en ${G.defs[bk].name}.`, 't');
@@ -3828,7 +3843,7 @@ function applyOp(op, ctx, t) {
     case 'scry': case 'surveil': if (isBotSeat(s)) botScry(s, op.n, op.k === 'surveil'); break;
     case 'putBack': { for (let i = 0; i < op.n; i++) { const c = isBotSeat(s) ? worstInHand(s) : null; if (c) moveCard(c, 'lib', { pos: 'top' }); } break; }
     case 'discard': { if (t && t.zone === 'hand') { moveCard(t, 'gy'); log(`${pn(s)} descarta ${cn(t)}.`); } break; }
-    case 'gain': if (op.perPow) op = Object.assign({}, op, { n: op.n * permsOf(s).filter(c => isCreature(c) && P(c) >= op.perPow).length }); if (gainLife(s, op.n)) log(`${pn(s)} gana ${pl(op.n, 'vida', 'vidas')}${by}.`, 'good'); break;
+    case 'gain': if (op.nAmt || op.n === 'x') op = Object.assign({}, op, { n: ctx.amount || 0 }); if (op.perPow) op = Object.assign({}, op, { n: op.n * permsOf(s).filter(c => isCreature(c) && P(c) >= op.perPow).length }); if (gainLife(s, op.n)) log(`${pn(s)} gana ${pl(op.n, 'vida', 'vidas')}${by}.`, 'good'); break;
     case 'selfLose': if (op.nX === 'converge') op = Object.assign({}, op, { n: convergeX(s) }); loseLife(s, op.n); log(`${pn(s)} pierde ${op.n} vida${op.n > 1 ? 's' : ''}${by}.`); break;
     case 'oppsLose': if (op.nX === 'gainedT') { const n = G.p[s].gainT === G.turnsTaken ? (G.p[s].gainedTurn || 0) : 0; if (!n) break; for (const o of oppsOf(s)) loseLife(o, n); log(`Cada oponente de ${pn(s)} pierde ${n} vidas${by}.`, 'bad'); break; } if (op.sacP) { const n = ctx.sacP || 0; for (const o of oppsOf(s)) loseLife(o, n); log(`Cada oponente de ${pn(s)} pierde ${n} vidas${by}.`, 'bad'); break; } ctx.oppsHit = oppsOf(s).length; { const src0 = src && (G.cards[src.id] || src); const asDmg = !!(op.dmg && src0 && src0.zone === 'bf'); const l0 = oppsOf(s).map(o => [o, G.p[o].life]); for (const o of oppsOf(s)) { if (asDmg) damagePlayer(o, op.n, src0); else loseLife(o, op.n); } const lost = l0.map(([o, l]) => [o, l - G.p[o].life]); const same = lost.every(x => x[1] === lost[0][1]); const what = n => asDmg ? `${n} de daño` : pl(n, 'vida', 'vidas'); if (!lost.length) break; if (same) log(asDmg ? `${src0 ? cn(src0) : pn(s)} hace ${what(lost[0][1])} a cada oponente de ${pn(s)}.` : `Cada oponente de ${pn(s)} pierde ${what(lost[0][1])}${by}.`, 'bad'); else log(`${asDmg ? (src0 ? cn(src0) : pn(s)) + ' hace daño' : 'Pierden vida'}: ${lost.map(([o, n]) => `${pn(o)} ${n}`).join(', ')}${asDmg ? '' : by}.`, 'bad'); } if (s !== 0 && alive(0)) toast(`Pierdes ${op.n} por ${src ? cn(src) : pn(s)}`, true); break;
     case 'devotion': {
@@ -4136,10 +4151,12 @@ async function castCopy(s, card) {
   let ops = a.spell.filter(o => o.k !== 'counter');
   const md = a.modal;
   if (/\b(instant|sorcery)\b/i.test(D(card).type_line || '')) for (const x of permsOf(s)) if (AB(x).copyIS) trigger(x, AB(x).castSelfIS, { amount: D(card).cmc || 0 });
-  if (isBotSeat(s)) { if (md && md.modes.length) ops = [...ops, ...botModes(s, card, 'main', md).flatMap(m => m.ops)]; runOpsAI(ops, { seat: s, src: card }); sba(); render(); return; }
+  // a copy keeps the X of the spell it copies; a copy cast without paying its cost has X = 0 (rules 107.3, 707.10)
+  const amount = Number.isFinite(card.xVal) ? card.xVal : 0;
+  if (isBotSeat(s)) { if (md && md.modes.length) ops = [...ops, ...botModes(s, card, 'main', md).flatMap(m => m.ops)]; runOpsAI(ops, { seat: s, src: card, amount }); sba(); render(); return; }
   if (md && md.modes.length) ops = [...ops, { k: 'mode', md }];
   __R(ME, G, await asSeat(s, async () => { const n0 = UI.prompts.length;
-  userOps(ops, { seat: s, src: card }, card);
+  userOps(ops, { seat: s, src: card, amount }, card);
   __R(ME, G, await resolveNewPrompts(n0)); })); sba(); render();
 }
 async function flushPendingCasts() {
@@ -5613,7 +5630,7 @@ function opText(op) {
     case 'augury': return `Exiliar ${op.n} de arriba, poner una tierra y lanzar gratis un hechizo de cada tipo`;
     case 'copySpell': return op.fb2 ? 'Copiar tu instantáneo/conjuro (2 copias con retrospectiva)' : 'Copiar tu instantáneo/conjuro';
     case 'castFromGy': return 'Lanzar gratis un instantáneo/conjuro de su cementerio (VM ≤ daño)';
-    case 'transform': return 'Exiliar y volver transformada';
+    case 'transform': return op.inPlace ? 'Transformarse' : 'Exiliar y volver transformada';
     case 'flipBack': return 'Exiliar y volver al campo (cara frontal)';
     case 'bounceAll': return `Devolver todas las criaturas${op.notSub ? ' no ' + op.notSub : ''} a la mano`;
     case 'castHandFree': return 'Lanzar gratis los hechizos que quieras de tu mano';
@@ -12769,6 +12786,7 @@ function x26Line(a, l0, PE) {
   if ((m = l.match(/^at the beginning of each opponent's draw step, you draw a card$/))) { (a.x26OppDraw ||= []).push({ k: 'draw', n: 1 }); return true; }
   if ((m = l.match(/^at the beginning of the upkeep of enchanted creature's controller, that player draws a card$/))) { a.x26AuraUp = true; return true; }
   if ((m = l.match(/^at the beginning of each upkeep, if an opponent was dealt noncombat damage last turn, return ~ from your graveyard to your hand$/))) { a.x26GyReturnNC = true; return true; }
+  if ((m = l.match(/^whenever ~ enters or transforms into ~, (.+)$/))) { const ops = PE(m[1]); if (!ops.length) return false; a.etb.push(...ops); a.x26OnTf = ops; return true; }
   if ((m = l.match(/^whenever ~ transforms into ~(?: and at the beginning of your first main phase)?, (.+)$/))) { const ops = PE(m[1].replace(/\. spend this mana only to cast spells with mana value 4 or greater$/, '')); if (!ops.length) return false; a.x26OnTf = ops; if (/first main phase/.test(l)) (a.x26Main1 ||= []).push(ops); return true; }
   if ((m = l.match(/^(?:no one dies! — )?when ~ enters, you may tap (?:him|her|it)\. when you do, another target nonattacking creature you control gains indestructible until end of turn$/))) { a.etb.push({ k: 'x26KwT', kws: ['indestructible'], tg: 'otherMyCre' }); return true; }
   // activated abilities with special zones
@@ -12960,7 +12978,7 @@ Object.assign(XOPS, {
   x26ArtLess(op, ctx) { G.p[ctx.seat].x26ArtLessT = G.turnsTaken; log(`Los hechizos de artefacto de ${pn(ctx.seat)} cuestan {1} menos este turno.`); }
 });
 XTEXT.x26PlanCtr = () => 'Un contador de plan en ella';
-{ const _pe2 = parseEffects; parseEffects = function (s) { const t = s.replace(/\.$/, '').trim(); if (/^put a plan counter on ~$/.test(t)) return [{ k: 'x26PlanCtr' }]; if (/^artifact spells you cast this turn cost \{1\} less to cast$/.test(t)) return [{ k: 'x26ArtLess' }]; if (/^transform ~$/.test(t)) return [{ k: 'transform' }]; if (/^draw a card\. you lose 1 life\. put a plan counter on ~$/.test(t)) return [{ k: 'draw', n: 1 }, { k: 'selfLose', n: 1 }, { k: 'x26PlanCtr' }]; if (/^draw a card, then discard a card\. put a plan counter on ~$/.test(t)) return [{ k: 'x26Loot' }, { k: 'x26PlanCtr' }]; if (/^sacrifice it and create three 2\/2 colorless robot villain artifact creature tokens$/.test(t) || /^create three 2\/2 colorless robot villain artifact creature tokens$/.test(t)) return [{ k: 'x26Tok', spec: X26TOK.robotVillain, n: 3 }]; if (/^draw a card\. put a \+1\/\+1 counter on each creature you control$/.test(t)) return [{ k: 'draw', n: 1 }, { k: 'x26CtrEach', n: 1 }]; if (/^return up to two target instant and\/or sorcery cards from your graveyard to your hand$/.test(t)) return [{ k: 'x26ReturnTwoAny', f: 'instant or sorcery', n: 2 }]; if (/^you may create a 0\/4 colorless wall creature token with defender$/.test(t) || /^create a 0\/4 colorless wall creature token with defender$/.test(t)) return [{ k: 'x26Tok', spec: X26TOK.wall, n: 1 }]; if (/^create a 1\/1 green (insect|squirrel) creature token$/.test(t)) return [{ k: 'x26Tok', spec: /insect/.test(t) ? X26TOK.insect : X26TOK.squirrel, n: 1 }]; if (/^create a 2\/2 red and white spirit creature token$/.test(t)) return [{ k: 'x26Tok', spec: X26TOK.spirit, n: 1 }]; if (/^create a 1\/1 colorless thopter artifact creature token with flying$/.test(t)) return [{ k: 'x26Tok', spec: X26TOK.thopter, n: 1 }]; if (/^put a \+1\/\+1 counter on each creature you control$/.test(t)) return [{ k: 'x26CtrEach', n: 1 }]; if (/^creatures you control get \+1\/\+0 until end of turn$/.test(t)) return [{ k: 'x26PumpAll', p: 1, t: 0 }]; if (/^you gain 1 life\.? you may play an additional land this turn$/.test(t)) return [{ k: 'gain', n: 1 }, { k: 'x26ExtraLand' }]; if (/^~ deals 1 damage to each opponent and you gain 1 life$/.test(t)) return [{ k: 'x26DmgEachOpp', n: 1, gain: 1 }]; return _pe2(s); }; }
+{ const _pe2 = parseEffects; parseEffects = function (s) { const t = s.replace(/\.$/, '').trim(); if (/^put a plan counter on ~$/.test(t)) return [{ k: 'x26PlanCtr' }]; if (/^artifact spells you cast this turn cost \{1\} less to cast$/.test(t)) return [{ k: 'x26ArtLess' }]; if (/^transform ~$/.test(t)) return [{ k: 'transform', inPlace: true }]; if (/^draw a card\. you lose 1 life\. put a plan counter on ~$/.test(t)) return [{ k: 'draw', n: 1 }, { k: 'selfLose', n: 1 }, { k: 'x26PlanCtr' }]; if (/^draw a card, then discard a card\. put a plan counter on ~$/.test(t)) return [{ k: 'x26Loot' }, { k: 'x26PlanCtr' }]; if (/^sacrifice it and create three 2\/2 colorless robot villain artifact creature tokens$/.test(t) || /^create three 2\/2 colorless robot villain artifact creature tokens$/.test(t)) return [{ k: 'x26Tok', spec: X26TOK.robotVillain, n: 3 }]; if (/^draw a card\. put a \+1\/\+1 counter on each creature you control$/.test(t)) return [{ k: 'draw', n: 1 }, { k: 'x26CtrEach', n: 1 }]; if (/^return up to two target instant and\/or sorcery cards from your graveyard to your hand$/.test(t)) return [{ k: 'x26ReturnTwoAny', f: 'instant or sorcery', n: 2 }]; if (/^you may create a 0\/4 colorless wall creature token with defender$/.test(t) || /^create a 0\/4 colorless wall creature token with defender$/.test(t)) return [{ k: 'x26Tok', spec: X26TOK.wall, n: 1 }]; if (/^create a 1\/1 green (insect|squirrel) creature token$/.test(t)) return [{ k: 'x26Tok', spec: /insect/.test(t) ? X26TOK.insect : X26TOK.squirrel, n: 1 }]; if (/^create a 2\/2 red and white spirit creature token$/.test(t)) return [{ k: 'x26Tok', spec: X26TOK.spirit, n: 1 }]; if (/^create a 1\/1 colorless thopter artifact creature token with flying$/.test(t)) return [{ k: 'x26Tok', spec: X26TOK.thopter, n: 1 }]; if (/^put a \+1\/\+1 counter on each creature you control$/.test(t)) return [{ k: 'x26CtrEach', n: 1 }]; if (/^creatures you control get \+1\/\+0 until end of turn$/.test(t)) return [{ k: 'x26PumpAll', p: 1, t: 0 }]; if (/^you gain 1 life\.? you may play an additional land this turn$/.test(t)) return [{ k: 'gain', n: 1 }, { k: 'x26ExtraLand' }]; if (/^~ deals 1 damage to each opponent and you gain 1 life$/.test(t)) return [{ k: 'x26DmgEachOpp', n: 1, gain: 1 }]; return _pe2(s); }; }
 
 /* ---------- planeswalkers kept at 0 loyalty; emblems ---------- */
 { const _sba = sba; sba = function () {
