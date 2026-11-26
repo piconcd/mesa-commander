@@ -1,5 +1,6 @@
 services:
   commander:
+    container_name: mesa-commander
     build: .
     restart: unless-stopped
     init: true
