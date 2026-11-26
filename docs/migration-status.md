@@ -1,17 +1,44 @@
-# Estado de la migración
-El código actual sigue utilizando el motor JavaScript de Mesa Commander. Las correcciones incrementales de voz, teclado, shocklands jugadas normalmente, pago normal de hechizos, afinidad por Aliados, tutores compatibles, imágenes de fichas y capítulos de saga no constituyen una integración completa de XMage.
+# Estado real del motor de reglas
 
-## Validación
-`node --test tests/*.test.mjs` ejecuta pruebas unitarias sobre fragmentos del motor real. No sustituye las partidas multijugador ni las pruebas de despliegue ARM64.
+Mesa Commander conserva el motor JavaScript en Chromium, el contenedor único,
+la voz WebRTC y el despliegue incondicional de las 07:00 Europe/Madrid.
+La integración experimental XMage no se activa; no se incorpora Java.
 
-## XMage
-Candidato: XMage Nexus, proxy Java, licencia MIT. Referencias fijadas para reproducir pruebas:
-- Proxy: https://github.com/Adamychen/xmage-nexus/tree/779c38624c0de265a679fa947bb771e01a9f0414
-- Fork de motor: https://github.com/Adamychen/xmage-nexus/tree/82a5d9a7f6ee202e5944d44ce30a4ffb5de170c5
+## Datos actualizables
+Node consulta en el arranque y diariamente a partir de las 07:00:
+- Scryfall Oracle Cards (bulk-data), por streaming, con catálogo compacto en
+  /data/rules/oracle.json.
+- Wizards Comprehensive Rules: enlace TXT oficial, contenido y hash en
+  /data/rules/comprehensive.json.
 
-El job de CI comprueba el proxy upstream, no conecta todavía Mesa al motor. Se requiere un servidor privado, adaptador de protocolo, sincronización y prioridades, y pruebas ARM64. No enviar datos de la mesa a servidores públicos.
+Si falla la descarga se conserva el fichero válido anterior. No se envían
+mazos al proveedor para esta actualización, no se descarga código ejecutable
+y no se bloquea el arranque ni el despliegue por esta tarea.
+Antes de empezar una partida central se refrescan las definiciones de los
+mazos seleccionados, incluidas las de bots, con el catálogo disponible.
+Las imágenes existentes se conservan. Si no hay catálogo se usan los datos
+existentes. La auditoría notifica avisos de cobertura a los jugadores
+correspondientes. No constituye una certificación de reglas ni de legalidad.
+Las reglas oficiales descargadas son documentación: no se convierten
+automáticamente en código ejecutable.
 
-## Pendientes
-Resolución completa de Allies at Last, Avatar Aang, earthbend y demás bending, Aang's Iceberg, Avatar's Wrath, Teferi's Protection, cobertura exhaustiva de tutores/costes y elección de colores de fuentes multicolor. Las sagas siguen las reglas oficiales: al comienzo de la primera fase principal, después del paso de robo, no en el mantenimiento.
+## Automatización
+Se amplía el intérprete del motor central para frases completas opcionales
+de robo y ganancia de vidas, con diálogo individual para humanos y heurística
+para bots. Se fuerza la asistencia de efectos soportados en partidas
+centrales, se corrige el registro de ganancia de vida prohibida y se
+cancelan contadores +1/+1 y -1/-1 durante la comprobación de estado.
 
-La integración se realiza en main sin activar el motor incompleto. El despliegue objetivo conserva el único contenedor mesa-commander. Véase [XMage en el contenedor único](xmage-single-container.md).
+## Límites
+La cobertura sigue siendo parcial. Entre otros pendientes: pila completa
+de disparadas y APNAP, selección de objetivos y costes antes del lanzamiento,
+capas y dependencias, orden y elección de reemplazos, reglas completas de
+Commander y Avatar. No existe intérprete universal de Forge ni garantía de
+soporte de nuevas mecánicas. Los avisos no bloquean la partida.
+El temporizador y el actualizador de GitHub siguen intactos; una partida
+activa no impide el despliegue programado.
+
+Pruebas: node --test tests/*.test.mjs. Se añaden pruebas del parser de
+catálogo, alias, horario Madrid, efectos opcionales y contadores.
+Quedan por verificar descargas reales, partidas multijugador y ARM64.
+Las notas anteriores de XMage describen un diseño experimental descartado.

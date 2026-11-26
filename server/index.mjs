@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { chromium } from 'playwright';
+import { startRulesCatalog } from './rules-catalog.mjs';
 
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../app');
@@ -77,6 +78,7 @@ function voiceMessage(id, m) {
     sendTo(dst, { t: 'voice-signal', from: id, data: d ? { description: { type: d.type, sdp: d.sdp } } : { candidate: c } });
   }
 }
+const rulesCatalog = startRulesCatalog();
 let ctx, page;
 let ready = false;
 let lastState = null;
@@ -239,6 +241,7 @@ async function launchGame() {
       const ws = connections.get(id);
       if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
     });
+    await page.exposeFunction('__mesaOracleCards', names => rulesCatalog.lookup(names));
     await page.goto(`http://127.0.0.1:${PORT}/?engine=1`, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => window.__centralReady === true, { timeout: 30000 });
     ready = true;
@@ -252,6 +255,7 @@ async function launchGame() {
 
 server.listen(PORT, '0.0.0.0', launchGame);
 process.on('SIGTERM', async () => {
+  rulesCatalog.close();
   ready = false;
   for (const ws of connections.values()) ws.close(1001, 'Server restarting');
   await ctx?.close().catch(e => console.error('Profile close', e));

@@ -12,6 +12,126 @@
   if (engine) {
     const links = new Map();
     let resettingGame = false;
+
+    // Extend the current engine; these operations are shared by humans and bots.
+    function mcOptionalEffect(text) {
+      const m=String(text).trim().match(/^you may (draw (a|one|two|three|four|five|\d+) cards?|gain (\d+) life)\.?$/i);
+      if(!m) return null;
+      const n=m[2]?({a:1,one:1,two:2,three:3,four:4,five:5}[m[2].toLowerCase()]||Number(m[2])):Number(m[3]);
+      if(!Number.isSafeInteger(n)||n<1||n>100) return null;
+      return {k:'mcOptional',effect:{k:m[2]?'draw':'gain',n}};
+    }
+    const mcOriginalParseEffects=parseEffects;
+    parseEffects=function(text){const op=mcOptionalEffect(text);return op?[op]:mcOriginalParseEffects(text);};
+    XTEXT.mcOptional=op=>'Opcional: '+opText(op.effect);
+    XPROMPT.mcOptional=async function(op,pr){
+      const game=G;
+      const yes=__R(ME,G,await askYesNo(pr.title||'Habilidad opcional',opText(op.effect)+' ¿Quieres hacerlo?'));
+      if(yes&&G===game&&!game.killed&&!game.over) applyOp(op.effect,pr.ctx,null);
+    };
+    XOPS.mcOptional=function(op,ctx){
+      if(!isBotSeat(ctx.seat)){seatOps(ctx.seat,[op],ctx,'Habilidad opcional');return;}
+      if(op.effect.k==='draw'&&G.p[ctx.seat].lib.length<op.effect.n) return;
+      if(op.effect.k==='gain'&&oppsOf(ctx.seat).some(o=>permsOf(o).some(x=>AB(x).remedy))) return;
+      applyOp(op.effect,ctx,null);
+    };
+    AB_CACHE.clear();
+
+    // An event that is prohibited must not count as gained life.
+    const mcOriginalGainLife=gainLife;
+    gainLife=function(s,n){
+      if(n>0&&G?.p[s]&&!G.p[s].dead&&G.p[s].lifeLock!==G.turnsTaken){
+        const blocker=permsAll().find(x=>AB(x).noGain);
+        if(blocker){log(pn(s)+' no puede ganar vidas ('+cn(blocker)+').','bad');return false;}
+      }
+      return mcOriginalGainLife(s,n);
+    };
+    function mcCancelOppositeCounters(cards){
+      for(const c of cards){
+        if(!c?.cnt||c.zone!=='bf') continue;
+        const n=Math.min(c.cnt.p1||0,c.cnt.m1||0);
+        if(n>0){c.cnt.p1-=n;c.cnt.m1-=n;}
+      }
+    }
+    const mcOriginalSba=sba;
+    sba=function(){if(G&&!G.over)mcCancelOppositeCounters(permsAll());return mcOriginalSba();};
+
+    // Shared matches always automate the supported effects.
+    const mcOriginalUserOps=userOps;
+    userOps=function(ops,ctx,src){
+      SET0.assist=true;
+      if(PSET[ME]) PSET[ME].assist=true;
+      if(ctx&&PSET[ctx.seat]) PSET[ctx.seat].assist=true;
+      return mcOriginalUserOps(ops,ctx,src);
+    };
+
+    let preparingRules=false;
+    function mcDeckSignature(){return JSON.stringify(NET.lobby.map(st=>[st.pid,st.deckId,!!st.online]));}
+    function mcAuditDeck(deck){
+      const issues=[];
+      for(const name of new Set([...deck.cmd,...deck.list.map(x=>x.n)])){
+        const d=deck.defs[name];
+        if(!d||d.type_line==='Carta sin datos'){issues.push(name+': sin datos');continue;}
+        for(const f of [d,d.back,d.adv].filter(Boolean)){
+          try{
+            const a=auditDef(f), manual=abOf(f).manual||[];
+            if(a.issues.length||manual.length) issues.push(f.name+': '+[...a.issues,...manual].join('; '));
+          }catch{issues.push(f.name+': auditoría no disponible');}
+        }
+      }
+      return issues;
+    }
+    async function mcStartWithOracle(link){
+      if(preparingRules)return;
+      preparingRules=true;
+      const signature=mcDeckSignature(), originals=new Map();
+      try{
+        const seats=NET.gameSeats().map((st,k)=>k>0&&!NET.lobby[k].online?{...st,deck:SEATS[k].deck}:st);
+        const decks=seats.map(st=>getDeck(st.deck));
+        const names=[...new Set(decks.flatMap(d=>[...d.cmd,...d.list.map(x=>x.n)]))];
+        const result=await window.__mesaOracleCards(names);
+        if(resettingGame||link.closed||signature!==mcDeckSignature()||(NET.inGame&&!G?.over)){
+          link.send({t:'central-error',message:'La sala ha cambiado; vuelve a pulsar Empezar partida.'});return;
+        }
+        const raw=new Map(result.cards), warnings=[];
+        for(const [k,deck] of decks.entries()){
+          const id=seats[k].deck,defs={...deck.defs};
+          let missing=0;
+          for(const n of new Set([...deck.cmd,...deck.list.map(x=>x.n)])){
+            const card=raw.get(n);
+            if(!card){missing++;continue;}
+            const d=fromScry(card),prior=defs[n];
+            if(prior?.img)d.img=prior.img;
+            if(prior?.imgL)d.imgL=prior.imgL;
+            defs[n]=d;
+          }
+          const fresh={...deck,defs};
+          if(!originals.has(id))originals.set(id,{present:Object.hasOwn(NET.decks,id),deck:NET.decks[id]});
+          NET.decks[id]=fresh;
+          const issues=mcAuditDeck(fresh);
+          warnings[k]={missing,issues};
+          if(issues.length||missing)console.warn('Rules audit seat',k,'unverified definitions:',missing,'parser warnings:',issues.length);
+        }
+        SET0.assist=true;
+        netStartGame();
+        if(!NET.inGame)return;
+        const total=warnings.reduce((n,w)=>n+w.issues.length,0);
+        if(!result.version)log('Catálogo Oracle local no disponible; se utilizan las definiciones anteriores.','bad');
+        if(total)log('Aviso del motor: hay '+total+' avisos de cobertura. La automatización no es completa.','bad');
+        for(const [k,w] of warnings.entries()){
+          const peer=NET.lobby[k]?.link;
+          if(peer&&(w.issues.length||w.missing))peer.send({t:'central-error',message:'Comprobación de tu mazo: '+w.missing+' cartas sin actualización Oracle; '+w.issues.length+' avisos del intérprete. '+w.issues.slice(0,3).join(' | ').slice(0,600)});
+        }
+        render();
+      }catch(e){
+        console.warn('Unable to prepare Commander rules:',e?.message||'unknown error');
+        link.send({t:'central-error',message:'No se pudo preparar la partida. Inténtalo de nuevo; los mazos se conservan.'});
+      }finally{
+        for(const [id,old] of originals){if(old.present)NET.decks[id]=old.deck;else delete NET.decks[id];}
+        preparingRules=false;
+      }
+    }
+
     // The browser inside Docker is the authority; NONE of its four seats is
     // occupied by the server process itself.
     NET.gameSeats = function () {
@@ -113,7 +233,7 @@
       const st = NET.lobby[k];
       if (st.link && st.link !== link) { const old = st.link; st.link = null; old.close(); }
       Object.assign(st, { kind: 'friend', pid: String(m.pid), name, online: true, link });
-      PSET[k] = { ...(PSET[k] || {}), ...(m.prefs || {}) };
+      PSET[k] = { ...(PSET[k] || {}), ...(m.prefs || {}), assist: true };
       link.send({ t: 'welcome', seat: k, code: ROOM, host: 'Servidor Mesa Commander', started: NET.inGame });
       if (NET.inGame && G?.p?.[k]) {
         G.p[k].away = false; G.p[k].name = name;
@@ -167,9 +287,12 @@
       if (m.t === 'central-start') {
         if (k !== 0 || (NET.inGame && !G?.over)) return;
         const ready = NET.lobby.filter(st => st.kind === 'friend' && st.online && !!st.deckId);
-        if (ready.length >= MIN_PLAYERS) netStartGame();
+        if (ready.length >= MIN_PLAYERS) return mcStartWithOracle(link);
         else link.send({ t: 'central-error', message: `Se necesitan al menos ${MIN_PLAYERS} jugadores con mazo.` });
-      } else netHostMsg(link, m);
+      } else {
+        if (m.t === 'prefs') m = { ...m, prefs: { ...(m.prefs || {}), assist: true } };
+        netHostMsg(link, m);
+      }
     };
     window.__centralDisconnect = id => {
       const link = links.get(id);
