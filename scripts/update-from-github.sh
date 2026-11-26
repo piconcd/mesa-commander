@@ -19,16 +19,9 @@ if [[ "$OLD" == "$NEW" ]]; then
   exit 0
 fi
 
-# No cortar la partida (el estado actual vive en Chromium; el volumen permite recuperar checkpoints).
-HEALTH=$(curl -fsS --max-time 8 http://127.0.0.1:3000/healthz || true)
-if [[ -z "$HEALTH" ]]; then
-  echo "No se despliega: el motor no está disponible. Requiere revisión." >&2
-  exit 1
-fi
-if ! printf '%s' "$HEALTH" | python3 -c 'import sys,json; s=json.load(sys.stdin); assert s.get("ready") and not s.get("activeGame") and not s.get("voiceUsers")'; then
-  echo "Actualización aplazada: hay partida o canal de voz activo, o motor no preparado."
-  exit 0
-fi
+# Despliegue programado incondicional: puede interrumpir partidas y voz.
+# No consultar /healthz: una partida activa o un motor no preparado no bloquean el despliegue.
+echo "Actualización programada: se desplegará aunque haya partidas o usuarios conectados."
 
 # La rama de producción se mantiene sin commits locales.
 git merge --ff-only origin/main

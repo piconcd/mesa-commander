@@ -12,7 +12,7 @@ Actualmente lo alojamos en una **Raspberry Pi 5 con Docker**. Se accede mediante
 - **Chat de voz opcional** dentro del juego: unirse, silenciar el micrófono y salir del canal. Usa WebRTC y requiere permiso de micrófono.
 - **Servidor centralizado** con Node.js, WebSockets y un motor de juego ejecutado en Chromium dentro de Docker.
 - **Guardado de puntos de recuperación** de la partida. No garantiza restaurar cada acción si se produce un apagado inesperado.
-- **Actualizaciones desde GitHub**: el servidor comprueba la rama `main` cada día a las **07:00 (Europe/Madrid)** y despliega cambios si no hay una partida activa ni usuarios en voz.
+- **Actualizaciones desde GitHub**: el servidor comprueba la rama `main` cada día a las **07:00 (Europe/Madrid)** y despliega los cambios aunque haya una partida activa o usuarios conectados, incluidos los del canal de voz.
 
 > **Estado del proyecto:** la interfaz y el motor funcionan, pero todavía faltan pruebas completas con varios jugadores reales, recuperación ante fallos y endurecimiento de la seguridad. El chat de voz puede necesitar un servidor TURN para algunas redes.
 
@@ -83,7 +83,7 @@ Puedes consultar el código públicamente. Para colaborar con permisos de escrit
 2. Realiza los cambios y selecciona la opción de **crear una rama nueva** en lugar de modificar directamente `main`.
 3. Guarda el cambio (*Commit changes*) y abre un **Pull Request** explicando qué has cambiado y por qué.
 4. El administrador revisará la propuesta. Si la aprueba, la incorporará a `main`.
-5. El servidor comprobará los cambios en su siguiente ejecución programada y los aplicará cuando sea seguro reiniciar.
+5. El servidor comprobará los cambios en su siguiente ejecución programada y los aplicará aunque haya una partida en curso.
 
 También puedes trabajar con **GitHub Desktop** o Git desde tu ordenador: clona el repositorio, crea una rama, modifica los archivos, haz *commit*, publica la rama y abre un Pull Request.
 
@@ -113,7 +113,7 @@ curl http://127.0.0.1:3000/healthz       # Comprobar el motor
 
 Para una instalación nueva, crea `.env` a partir de `.env.example`, establece `INVITE_PASSWORD` (mínimo 12 caracteres) y arranca `docker compose up -d --build commander`. **Nunca publiques `.env`**.
 
-Las actualizaciones se gestionan con `scripts/update-from-github.sh` y el temporizador `deploy/systemd/mesa-commander-update.timer` (07:00, hora de Madrid). Si el equipo estaba apagado, `Persistent=true` permite recuperar la comprobación al encenderlo. Si existe una partida o alguien está en voz, el despliegue se aplaza hasta una ejecución posterior; **no se aplica inmediatamente al terminar la partida**.
+Las actualizaciones se gestionan con `scripts/update-from-github.sh` y el temporizador `deploy/systemd/mesa-commander-update.timer` (07:00, hora de Madrid). Si el equipo estaba apagado, `Persistent=true` permite recuperar la comprobación al encenderlo. Si hay una nueva revisión, el despliegue se realiza sin consultar el estado del motor, de las partidas ni del canal de voz. **Puede interrumpir una partida o una conversación en curso**; los jugadores deberán reconectar y la recuperación del último checkpoint no garantiza conservar todas las acciones. Esta política también se aplica si se inicia el servicio manualmente. Se mantienen las comprobaciones de cambios locales, el bloqueo de ejecuciones simultáneas y los intentos de restauración ante fallos de compilación o despliegue.
 
 ```bash
 systemctl list-timers --all mesa-commander-update.timer
