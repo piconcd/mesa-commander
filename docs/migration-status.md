@@ -48,3 +48,14 @@ Cambios activos en `app/index.html`:
 - La ruta de contrahechizo envía al cementerio o exilio según flashback, antes de las comprobaciones de estado; se corrige un caso de disparadas de muerte al aplicar exilio en lugar de morir.
 
 Estas son correcciones parciales sobre el motor existente; no garantizan conformidad universal. Se ha comprobado la sintaxis del script HTML y del núcleo, pero no se han ejecutado las nuevas pruebas funcionales ni partidas. La regla de leyendas, la resolución simultánea, los efectos de capas y reemplazo reales, las cuatro mecánicas de bending, todos los costes/objetivos y las cartas Oracle siguen pendientes de integración general.
+
+
+## Runtime nativo experimental
+
+`server/engine/game.mjs` añade un flujo ejecutable independiente: creación determinista de partida, comandos transaccionales con revisión, decisiones serializables, prioridad multijugador, pila, objetivos, costes de maná básicos, habilidades activadas y disparadas, reemplazos declarativos, características continuas, SBAs, turnos, combate básico, validación de mazo Commander individual, impuesto, daño de comandante, vistas privadas y replay. Las definiciones semánticas se proporcionan explícitamente al crear la partida; no se interpreta Oracle como código.
+
+API: `createGame(config)`, `submit(state, seat, command)`, `viewFor(state, seat)`, `actionCandidates(state, seat)`, `replay(config, history)`, `validateCommanderDeck(deck, definitions)`. Las decisiones se contestan mediante `{kind:'choose', revision, id, value}`. El servidor debe conservar el estado completo en privado y enviar exclusivamente la proyección por asiento. Los candidatos son estructurales y no garantizan legalidad de todas las combinaciones.
+
+**No es todavía el motor productivo ni una implementación completa de Magic.** No hay catálogo semántico Oracle revisado, integración WebSocket/UI/bots, persistencia de servidor, mulligan, comandantes asociados, costes alternativos/híbridos completos, auras, batallas, capas/dependencias dinámicas completas, reglas especiales, bending, tutores, phasing, adjudicación de bucles ni cobertura exhaustiva de combate y eliminación. La marca reviewed procede de definiciones confiables del servidor y no acredita por sí sola conformidad. Mantener Chromium como autoridad hasta superar los criterios del plan.
+
+Seis casos de runtime se ejecutaron con un harness JavaScript aislado durante el desarrollo; no equivale a ejecutar Node CI, ni a partidas reales. CI recoge el nuevo archivo de pruebas con el glob existente.
