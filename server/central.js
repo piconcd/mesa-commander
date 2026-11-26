@@ -156,7 +156,8 @@
       return { t: 'lobby', code: NET.code, started: NET.inGame, seats: SEAT_IDS.map(k => {
         const st = NET.lobby[k];
         return st.kind === 'friend'
-          ? { kind: 'friend', name: st.name || '', deck: st.deckName || '', online: !!st.online, taken: !!st.pid }
+          ? { kind: 'friend', name: st.name || '', deck: st.deckName || '', online: !!st.online, taken: !!st.pid,
+              away: !!(NET.inGame && st.pid && !st.online && G?.p?.[k] && !G.p[k].isBot && !G.p[k].dead) }
           : { kind: 'bot', name: SEATS[k].name || `Bot ${k + 1}`, deck: getDeck(SEATS[k].deck).name };
       }) };
     };
@@ -271,6 +272,21 @@
       return { ok: true };
     }
     window.__centralResetGame = centralResetGame;
+    // The server has no host player who can press «Pasar a bot». Any connected
+    // player can hand the seat of a disconnected friend to a bot, so the game
+    // does not stall waiting for someone who is not coming back.
+    function centralSeatToBot(link, target) {
+      const by = link && !link.closed ? NET.peerOf(link) : undefined;
+      if (by === undefined || !NET.lobby?.[by]?.online) return { ok: false, message: 'Solo un jugador conectado puede pasar un asiento a un bot.' };
+      if (!NET.inGame || !G || G.over || TOUR) return { ok: false, message: 'No hay una partida de Commander en curso.' };
+      if (!SEAT_IDS.includes(target) || target === by) return { ok: false, message: 'Asiento no válido.' };
+      const st = NET.lobby[target], p = G.p?.[target];
+      if (!st || st.kind !== 'friend' || st.online || !p || p.isBot) return { ok: false, message: 'Ese jugador está conectado o ya lo juega un bot.' };
+      if (p.dead) return { ok: false, message: 'Ese jugador ya ha sido eliminado.' };
+      netToBot(target);
+      return { ok: true };
+    }
+    window.__centralSeatToBot = centralSeatToBot;
     window.__centralConnect = id => {
       if (!window.__centralReady || resettingGame) return false;
       const link = { open: true, id, closed: false,
@@ -289,6 +305,9 @@
         const ready = NET.lobby.filter(st => st.kind === 'friend' && st.online && !!st.deckId);
         if (ready.length >= MIN_PLAYERS) return mcStartWithOracle(link);
         else link.send({ t: 'central-error', message: `Se necesitan al menos ${MIN_PLAYERS} jugadores con mazo.` });
+      } else if (m.t === 'central-tobot') {
+        const result = centralSeatToBot(link, m.seat);
+        if (!result.ok) link.send({ t: 'central-error', message: result.message });
       } else {
         if (m.t === 'prefs') m = { ...m, prefs: { ...(m.prefs || {}), assist: true } };
         netHostMsg(link, m);
@@ -377,6 +396,34 @@
     b.textContent = NET.inGame ? 'Nueva partida' : 'Empezar partida';
     const reset = document.getElementById('central-reset');
     if (reset) reset.hidden = !(NET.mode === 'client' && NET.inGame && !NET.tour && NET.link?.open && Number.isInteger(NET.seat));
+    centralRenderToBot();
+  }
+  // One button per disconnected friend: «Pasar a bot: <nombre>».
+  function centralRenderToBot() {
+    const box = document.getElementById('central-tobot');
+    if (!box) return;
+    const live = NET.mode === 'client' && NET.inGame && !NET.tour && !NET.meta?.over && NET.link?.open && Number.isInteger(NET.seat);
+    const away = live && Array.isArray(NET.seats)
+      ? NET.seats.map((s, k) => ({ ...s, k })).filter(s => s.kind === 'friend' && s.away && s.k !== NET.seat)
+      : [];
+    const signature = away.map(s => s.k + ':' + s.name).join('|');
+    if (box.dataset.signature === signature) return;
+    box.dataset.signature = signature;
+    box.replaceChildren();
+    for (const s of away) {
+      const who = s.name || `Jugador ${s.k + 1}`;
+      const b = document.createElement('button');
+      b.className = 'btn';
+      b.textContent = `Pasar a bot: ${who}`;
+      b.title = `${who} está desconectado. Un bot jugará su asiento hasta el final de la partida.`;
+      b.onclick = () => {
+        if (!NET.link?.open) return;
+        if (window.confirm(`¿Pasar el asiento de ${who} a un bot? Un bot jugará por ${who} hasta el final de esta partida y ${who} ya no podrá volver a entrar en ella.`)) {
+          NET.link.send({ t: 'central-tobot', seat: s.k });
+        }
+      };
+      box.appendChild(b);
+    }
   }
   function mount() {
     for (const b of document.querySelectorAll('.topbar [data-act="online"]')) b.hidden = true;
@@ -419,6 +466,9 @@
       }
     };
     bar.appendChild(reset);
+    const toBot = document.createElement('span');
+    toBot.id = 'central-tobot'; toBot.style.display = 'contents';
+    bar.appendChild(toBot);
     setInterval(() => { centralRenderStart(); enter.hidden = NET.mode === 'client' && NET.inGame; }, 600);
   }
   mount();
