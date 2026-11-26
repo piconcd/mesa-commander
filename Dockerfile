@@ -5,6 +5,7 @@ RUN npm install --omit=dev --no-audit --no-fund
 COPY server/ ./server/
 COPY app/ ./app/
 COPY config/ ./config/
+COPY scripts/probe-xmage.mjs ./scripts/probe-xmage.mjs
 ENV NODE_ENV=production PORT=3000 CHROMIUM_PROFILE=/data/chromium
 RUN mkdir -p /data/chromium && chown -R pwuser:pwuser /data /usr/src/app
 USER pwuser

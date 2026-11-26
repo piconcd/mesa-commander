@@ -3,14 +3,7 @@
 Estado: diseño y entorno aislado. XMage todavía no está integrado.
 
 ## Entorno
-Usar una copia de trabajo separada de producción, rama feature/full-mtg-rules-engine.
-Configurar .env con contraseña de pruebas distinta. Ejecutar:
-```sh
-docker compose -p mesa-commander-dev -f compose.dev.yaml up -d --build
-curl -fsS http://127.0.0.1:3001/healthz
-```
-Acceso por túnel SSH al puerto 3001. No publicar el entorno. No compartir el volumen de Chromium ni instalar el temporizador de producción en esta copia.
-Comprobar RAM, almacenamiento y arquitectura ARM64 antes de arrancar.
+La decisión de despliegue actual es integrar los cambios en main y conservar el contenedor mesa-commander existente. No iniciar otro servicio de aplicación en Raspberry. Las pruebas aisladas se ejecutan en CI o fuera de producción; no activar el motor incompleto. Véase [XMage en el contenedor único](xmage-single-container.md).
 
 ## Fases
 1. Reproducir fallos del cliente legado y corregir voz, teclado y tokens en cambios pequeños.
@@ -18,7 +11,7 @@ Comprobar RAM, almacenamiento y arquitectura ARM64 antes de arrancar.
 3. Prototipo de partida: importar dos mazos, crear mesa, lanzar hechizo, elegir objetivo, pagar coste y ceder prioridad. Luego cuatro jugadores y bots.
 4. Adaptador Node/Java: comandos autenticados por asiento, solicitudes de decisión con identificador, vistas filtradas por jugador, snapshots versionados, reconexión y manejo de errores. No exponer manos ni bibliotecas privadas ni aceptar cambios de estado del navegador.
 5. Integrar vistas de mesa, pila, fases, combate, selección de maná, revelaciones y eventos. XMage es única autoridad de reglas en partidas nuevas; no combinar dos motores en una partida.
-6. Validación, despliegue y rollback. No intentar migrar partidas activas entre motores. Mantener main intacta hasta aprobación; comprobar salud tras despliegue y conservar datos de producción.
+6. Validación, despliegue y rollback. No intentar migrar partidas activas entre motores. Integrar cambios compatibles en main; activar el motor únicamente tras superar las pruebas de aceptación. Comprobar salud tras despliegue y conservar datos de producción.
 
 ## Pruebas de aceptación
 | Caso | Resultado esperado |

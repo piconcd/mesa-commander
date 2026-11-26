@@ -14,4 +14,4 @@ El job de CI comprueba el proxy upstream, no conecta todavía Mesa al motor. Se 
 ## Pendientes
 Resolución completa de Allies at Last, Avatar Aang, earthbend y demás bending, Aang's Iceberg, Avatar's Wrath, Teferi's Protection, cobertura exhaustiva de tutores/costes y elección de colores de fuentes multicolor. Las sagas siguen las reglas oficiales: al comienzo de la primera fase principal, después del paso de robo, no en el mantenimiento.
 
-No fusionar el PR global ni desplegarlo automáticamente hasta validar los cambios.
+La integración se realiza en main sin activar el motor incompleto. El despliegue objetivo conserva el único contenedor mesa-commander. Véase [XMage en el contenedor único](xmage-single-container.md).
