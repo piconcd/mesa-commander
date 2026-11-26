@@ -5680,6 +5680,7 @@ async function resolvePromptInner(id) {
   while (queue.length) {
     const op = queue.shift();
     if (!G || G.over) return;
+    if (op && op.cnd && typeof cdOk === 'function' && !cdOk(op.cnd, pr.ctx)) continue;
     if (XPROMPT[op.k] && !needsTarget(op)) { __R(ME, G, await XPROMPT[op.k](op, pr)); sba(); render(); continue; }
     if (op.k === 'mode') { const ms = __R(ME, G, await pickModes(op.md, pr.title)); if (ms && op.md.spree) { const cost = ms.reduce((a, m) => ({ generic: a.generic + (m.cost ? m.cost.generic : 0), pips: [...a.pips, ...(m.cost ? m.cost.pips : [])] }), { generic: 0, pips: [] }); if (SET.autoTap && (cost.generic || cost.pips.length)) { const sol = solve(pr.ctx.seat, cost); if (sol) pay(pr.ctx.seat, sol); } } if (ms && ms.length) { log(`Eliges: ${ms.map(m => esc(m.text)).join(' / ')}`); queue.unshift(...ms.flatMap(m => m.ops)); } continue; }
     if (op.k === 'tutor') { __R(ME, G, await openLibrarySearch(pr.ctx.seat, op.top ? `Busca ${op.f ? 'un ' + esES(op.f) : 'una carta'} y ponla encima de tu biblioteca` : 'Busca una carta y ponla en tu mano', { f: op.f, top: !!op.top, reveal: !!op.reveal, restricted: true })); continue; }
@@ -14400,6 +14401,211 @@ function avWaterLine(a, l, PE, inner) {
 { const _fcw = fullCost; fullCost = function (c, s) { const r = _fcw(c, s); const n = abOf(D(c)).avWbAdd; if (n && r) { r.generic += n; r.wb = (r.wb || 0) + n; } return r; }; }
 // «ward—waterbend {N}» is a keyword line, read before the line hooks: add it once the card has been read
 { const _abw = abOf; const done = new WeakSet(); abOf = function (d) { const r = _abw(d); if (r && r !== EMPTY_AB && d && !done.has(r)) { done.add(r); const m = String(d.oracle_text || '').toLowerCase().match(/^ward—waterbend \{(\d+)\}/m); if (m) { r.ward = Math.max(r.ward || 0, +m[1]); r.avWardWb = true; } } return r; }; }
+
+/* =====================================================================
+   Conditions «if …» (CR 603.4 intervening «if» in triggers; 608.2c conditional instructions)
+   The old parser looks for effects anywhere in a sentence, so «if you attacked this turn, create a Treasure
+   token» became a Treasure with no condition. Every sentence with its own «if» is now checked: if the parse
+   is the same with and without the condition, the condition was lost. Then the condition is compiled
+   (cdCond) and the ops of that sentence only happen when it holds («instead»: the sentence before only when
+   it doesn't). If the condition or its effect can't be read, the whole text stays unrecognised (no half
+   effects). Not covered here: «unless», «would … instead» (replacement effects) and cost reductions.
+   ===================================================================== */
+const CD_SKIP = /costs? (?:\{[^}]*\}|\w+) (?:less|more) to (?:cast|activate)|\bonly if\b|\bif able\b|\bas though\b|\bwould\b/;
+function cdMask(s) { return String(s).replace(/"[^"]*"/g, x => '"' + '_'.repeat(Math.max(0, x.length - 2)) + '"'); }
+function cdSplit(s) {
+  const m = cdMask(s); const out = []; const re = /\.\s+/g; let last = 0, r;
+  while ((r = re.exec(m))) { out.push(s.slice(last, r.index)); last = r.index + r[0].length; }
+  out.push(s.slice(last));
+  return out.map(x => x.trim().replace(/\.$/, '')).filter(Boolean);
+}
+// one sentence → { c: condition, e: effect alone, stripped: the sentence without its condition, instead }
+function cdClause(t) {
+  const m = cdMask(t); if (!/\bif\b/.test(m) || CD_SKIP.test(m)) return null;
+  const tidy = e => e.replace(/^then /, '').replace(/,? instead$/, '').trim();
+  let q = m.match(/^(then )?if ([^,"]+), (instead )?/);
+  if (q) { const rest = t.slice(q[0].length); return { c: q[2].trim(), e: tidy(rest), stripped: (q[1] || '') + (q[3] || '') + rest, instead: !!q[3] || /,? instead$/.test(rest) }; }
+  q = m.match(/^(.+),? (instead )?if ([^,"]+)$/);
+  if (q && !/\bif\b/.test(q[1])) { const e = t.slice(0, q[1].length).replace(/,$/, ''); return { c: q[3].trim(), e: tidy(e), stripped: e + (q[2] ? ' instead' : ''), instead: !!q[2] || /,? instead$/.test(e) }; }
+  return { c: null, e: null, stripped: m.replace(/,? ?\bif [^,"]+,? ?/, ' ').trim(), instead: false };
+}
+const cdNum = w => /^\d+$/.test(w) ? +w : num(w);
+const cdPlain = f => /^[a-z' \/-]+$/.test(f) && !/\b(with|that|than|this|among|named|card|cards|spell|spells|under|of)\b/.test(f);
+// the condition text (lower case, ~ = this card) → something cdOk can check, or null
+function cdCond(c) {
+  let m; const T = c; // the original text, shown to the player
+  if ((m = c.match(/^you control ((\w+) or more|at least (\w+) other|another|an|a|one|two|three|four|five) (.+?)(?: with (power|toughness) (\d+) or greater)?$/)) && cdPlain(m[4])) {
+    const other = m[1] === 'another' || !!m[3]; const n = m[2] ? cdNum(m[2]) : m[3] ? cdNum(m[3]) : (cdNum(m[1]) || 1);
+    if (!(n > 0)) return null;
+    return { k: 'ctl', n, other, f: m[4], pow: m[5] === 'power' ? +m[6] : 0, tou: m[5] === 'toughness' ? +m[6] : 0, text: T };
+  }
+  if ((m = c.match(/^you control (?:a|an) (.+?) with a \+1\/\+1 counter on it$/)) && cdPlain(m[1])) return { k: 'ctl', n: 1, f: m[1], p1: true, text: T };
+  if ((m = c.match(/^you control (?:a|an) (.+?) with a counter on it$/)) && cdPlain(m[1])) return { k: 'ctl', n: 1, f: m[1], anyCtr: true, text: T };
+  if ((m = c.match(/^you don't control (?:a|an|any) (.+)$/)) && cdPlain(m[1])) return { k: 'ctl', n: 1, f: m[1], none: true, text: T };
+  if ((m = c.match(/^an opponent controls more (creatures|lands) than you$/))) return { k: 'more', f: m[1], text: T };
+  if (/^it's your turn$/.test(c)) return { k: 'myTurn', text: T };
+  if (/^it's not your turn$|^it isn't your turn$/.test(c)) return { k: 'myTurn', neg: true, text: T };
+  if ((m = c.match(/^there (?:are|is) (\w+) or more cards in your graveyard$/))) return { k: 'gy', n: cdNum(m[1]), f: '', text: T };
+  if ((m = c.match(/^there (?:are|is) (\w+) or more ([a-z' \/-]+?) cards in your graveyard$/)) && cdPlain(m[2])) return { k: 'gy', n: cdNum(m[1]), f: m[2], text: T };
+  if ((m = c.match(/^there(?:'s| is) an? ([a-z' \/-]+?) card in your graveyard$/)) && cdPlain(m[1])) return { k: 'gy', n: 1, f: m[1], text: T };
+  if ((m = c.match(/^you have (\w+) or more cards in (?:your )?hand$/))) return { k: 'hand', n: cdNum(m[1]), text: T };
+  if ((m = c.match(/^your life total is (\d+) or (less|greater)$/))) return { k: 'life', n: +m[1], le: m[2] === 'less', text: T };
+  if (/^you(?:'ve| have)? gained life this turn$/.test(c)) return { k: 'gained', text: T };
+  if (/^a creature died this turn$/.test(c)) return { k: 'died', text: T };
+  if (/^a creature entered the battlefield under your control this turn$/.test(c)) return { k: 'creIn', text: T };
+  if (/^you've cast an instant or sorcery spell this turn$/.test(c)) return { k: 'isCast', text: T };
+  if ((m = c.match(/^(?:~|it) has (\w+) or more ([a-z]+) counters on it$/)) && m[2] !== 'the') return { k: 'srcCtr', n: cdNum(m[1]), kind: m[2], text: T }; // quest, lore…: counters this card puts on itself
+  if ((m = c.match(/^~ has (\w+) or more ([a-z]+|\+1\/\+1) counters on it$/)) || (m = c.match(/^there are (\w+) or more ([a-z]+|\+1\/\+1) counters on (?:~|her|him)$/))) return { k: 'srcCtr', n: cdNum(m[1]), kind: m[2] === '+1/+1' ? 'p1' : m[2], text: T };
+  if ((m = c.match(/^(?:~'s|her|his) power is (\d+) or greater$/))) return { k: 'srcPow', n: +m[1], text: T };
+  if ((m = c.match(/^~ is an? ([a-z]+)$/))) return { k: 'srcIs', f: m[1], text: T };
+  return null;
+}
+function cdType(d, phrase, card) { return !phrase || phrase.split(/,? (?:and\/or|or) /).some(part => part.split(/\s+/).filter(Boolean).every(w => typeMatchDef(d, w, card))); }
+function cdOk(sp, ctx) {
+  if (!sp) return true;
+  if (sp.not) return !cdOk(sp.not, ctx);
+  if (sp.all) return sp.all.every(x => cdOk(x, ctx));
+  if (!G || !ctx) return false;
+  const s = ctx.seat; const p = G.p[s]; if (!p) return false;
+  const src = ctx.src ? (G.cards[ctx.src.id] || ctx.src) : null;
+  switch (sp.k) {
+    case 'ctl': { const n = permsOf(s).filter(x => (!sp.other || !src || x.id !== src.id) && cdType(D(x), sp.f, x) && (!sp.pow || P(x) >= sp.pow) && (!sp.tou || T(x) >= sp.tou) && (!sp.p1 || (x.cnt.p1 || 0) > 0) && (!sp.anyCtr || Object.values(x.cnt || {}).some(v => v > 0))).length; return sp.none ? n === 0 : n >= sp.n; }
+    case 'more': { const f = sp.f === 'lands' ? isLand : isCreature; const me = permsOf(s).filter(f).length; return oppsOf(s).some(o => permsOf(o).filter(f).length > me); }
+    case 'myTurn': return (G.active === s) === !sp.neg;
+    case 'gy': return p.gy.filter(id => cdType(G.defs[G.cards[id].n], sp.f, null)).length >= sp.n;
+    case 'hand': return p.hand.length >= sp.n;
+    case 'life': return sp.le ? p.life <= sp.n : p.life >= sp.n;
+    case 'gained': return p.gainT === G.turnsTaken && (p.gainedTurn || 0) > 0;
+    case 'died': return G.p.some(q => q && q.fxDiedT === G.turnsTaken && (q.fxDiedN || 0) > 0);
+    case 'creIn': return x26CreIn(s) > 0;
+    case 'isCast': return p.fxISCastT === G.turnsTaken;
+    case 'srcCtr': return !!src && ((src.cnt || {})[sp.kind] || 0) >= sp.n;
+    case 'srcPow': return !!src && src.zone === 'bf' && P(src) >= sp.n;
+    case 'srcIs': return !!src && cdType(D(src), sp.f, src);
+  }
+  return false;
+}
+function cdParse(s, pe) {
+  const r = pe(s);
+  if (!r || !r.length || typeof s !== 'string' || !/\bif\b/.test(s) || s.includes('§')) return r;
+  const sents = cdSplit(s); const cls = sents.map(cdClause);
+  if (!cls.some(Boolean)) return r;
+  const J = x => JSON.stringify(x); const rj = J(r);
+  if (J(pe(sents.join('. '))) !== rj) return r;
+  const out = r.map(o => Object.assign({}, o)); const used = new Set(); const late = new Set(); const drop = new Set(); const add = [];
+  const take = (ops, cnd, i) => { for (const o of ops) { const k = J(o); const j = r.findIndex((x, n) => !used.has(n) && J(x) === k); if (j < 0) return false; used.add(j); if (cnd === 'drop') drop.add(j); else out[j].cnd = cnd; if (i > 0) late.add(j); } return true; };
+  for (let i = 0; i < sents.length; i++) {
+    const cl = cls[i]; if (!cl) continue;
+    const alt = sents.slice(); alt[i] = cl.stripped;
+    if (J(pe(alt.join('. '))) !== rj) continue; // another rule already reads this condition
+    // «you may <cost>. if you do, <effect>» (CR 608.2c): the effect only happens if the cost was paid
+    if (cl.c === 'you do' && !cl.instead && i > 0 && !cls[i - 1]) {
+      const cost = cdCost(sents[i - 1]); const opsE = cost && cl.e ? pe(cl.e) : [];
+      if (!cost || !opsE.length || opsE.some(o => o.k === 'mode')) return [];
+      const opsX = pe(sents[i - 1]);
+      if (!take(opsE, 'drop', i) || (opsX.length && !take(opsX, 'drop', i))) return [];
+      add.push({ k: 'cdMay', cost, ops: opsE });
+      continue;
+    }
+    const spec = cl.c ? cdCond(cl.c) : null;
+    if (!spec || !cl.e || cl.e.includes('"')) return []; // a granted ability in quotes is not read here
+    const opsE = pe(cl.e); if (!opsE.length || !take(opsE, spec, i)) return [];
+    if (cl.instead) { if (i === 0 || cls[i - 1]) return []; const opsX = pe(sents[i - 1]); if (!opsX.length || !take(opsX, { not: spec, text: spec.text }, i)) return []; }
+  }
+  // what a later sentence checks happens after the sentences before it (counters, life…)
+  const keep = (o, j) => !drop.has(j);
+  return [...out.filter((o, j) => keep(o, j) && !late.has(j)), ...add, ...out.filter((o, j) => keep(o, j) && late.has(j))];
+}
+// the optional cost before «if you do»; null if it isn't one of these
+function cdCost(t) {
+  let m;
+  if (/^you may sacrifice an artifact or discard a card$/.test(t)) return { any: [{ sac: 'artifact' }, { discard: 1 }] };
+  if (/^you may (?:sacrifice|exile) ~$/.test(t)) return { self: /exile/.test(t) ? 'exile' : 'sac' };
+  if ((m = t.match(/^you may sacrifice (another|an|a) ([a-z ,\/-]+)$/)) && cdPlain(m[2])) return { sac: m[2], other: m[1] === 'another' };
+  if (/^you may discard a card$/.test(t)) return { discard: 1 };
+  if ((m = t.match(/^you may pay (\d+) life$/))) return { life: +m[1] };
+  // «blight N»: put N -1/-1 counters on a creature you control (Lorwyn Eclipsed reminder text)
+  if ((m = t.match(/^you may blight (\d+)$/))) return { blight: +m[1] };
+  if (/^you may exile a card from your hand$/.test(t)) return { exHand: true };
+  if ((m = t.match(/^you may exile (?:a|an) (?:([a-z ]+?) )?card from your graveyard$/)) && (!m[1] || cdPlain(m[1]))) return { exGy: m[1] || '' };
+  if (/^you may remove a \+1\/\+1 counter from ~$/.test(t)) return { rmSelf: 'p1' };
+  if (/^you may discard your hand$/.test(t)) return { discardHand: true };
+  if (/^you may put a card from your hand on the bottom of your library$/.test(t)) return { bottomHand: true };
+  return null;
+}
+function cdCostText(c) {
+  if (c.any) return c.any.map(cdCostText).join(' o ');
+  if (c.self) return c.self === 'exile' ? 'exiliar esta carta' : 'sacrificar esta carta';
+  if (c.sac) return `sacrificar ${c.other ? 'otro permanente' : 'un permanente'} (${esc(esES(c.sac))})`;
+  if (c.discard) return 'descartar una carta';
+  if (c.life) return `pagar ${c.life} vidas`;
+  if (c.blight) return `marchitar ${c.blight} (poner ${c.blight} contador${c.blight > 1 ? 'es' : ''} −1/−1 en una criatura tuya)`;
+  if (c.exHand) return 'exiliar una carta de tu mano';
+  if (c.exGy != null) return `exiliar ${c.exGy ? 'una carta de ' + esc(esES(c.exGy)) : 'una carta'} de tu cementerio`;
+  if (c.rmSelf) return 'quitar un contador +1/+1 de esta carta';
+  if (c.discardHand) return 'descartar tu mano';
+  if (c.bottomHand) return 'poner una carta de tu mano en el fondo de tu biblioteca';
+  return '';
+}
+// what can pay one cost: cards to choose from (empty list = can't), or true for life
+function cdCands(c, s, src) {
+  if (c.self) return src && src.zone === 'bf' ? [src] : [];
+  if (c.sac) return permsOf(s).filter(x => (!c.other || !src || x.id !== src.id) && cdType(D(x), c.sac, x));
+  if (c.discard || c.exHand || c.bottomHand) return G.p[s].hand.map(id => G.cards[id]);
+  if (c.life) return G.p[s].life >= c.life ? true : [];
+  if (c.blight) return permsOf(s).filter(isCreature);
+  if (c.exGy != null) return G.p[s].gy.map(id => G.cards[id]).filter(x => x && cdType(D(x), c.exGy, null));
+  if (c.rmSelf) return src && src.zone === 'bf' && (src.cnt[c.rmSelf] || 0) > 0 ? [src] : [];
+  if (c.discardHand) return true;
+  return [];
+}
+function cdPay(c, s, pick) {
+  if (c.life) { loseLife(s, c.life); log(`${pn(s)} paga ${c.life} vidas.`); return true; }
+  if (c.discardHand) { const h = G.p[s].hand.map(id => G.cards[id]); h.forEach(x => moveCard(x, 'gy')); log(`${pn(s)} descarta su mano (${h.length}).`); return true; }
+  if (!pick) return false;
+  if (c.blight) { addCounters(pick, c.blight, 'm1'); log(`${pn(s)} marchita ${c.blight}: ${cn(pick)} recibe ${c.blight} contador${c.blight > 1 ? 'es' : ''} −1/−1.`); return true; }
+  if (c.exHand || c.exGy != null) { moveCard(pick, 'exile'); log(`${pn(s)} exilia ${cn(pick)}.`); return true; }
+  if (c.rmSelf) { pick.cnt[c.rmSelf] = Math.max(0, (pick.cnt[c.rmSelf] || 0) - 1); recomputeMods(); log(`${pn(s)} quita un contador de ${cn(pick)}.`); return true; }
+  if (c.bottomHand) { moveCard(pick, 'lib', { pos: 'bottom' }); log(`${pn(s)} pone una carta de su mano en el fondo de su biblioteca.`); return true; }
+  if (!pick) return false;
+  if (c.self === 'exile') { moveCard(pick, 'exile'); log(`${pn(s)} exilia ${cn(pick)}.`); return true; }
+  if (c.sac || c.self) { log(`${pn(s)} sacrifica ${cn(pick)}.`); sacrifice(pick); return true; }
+  if (c.discard) { moveCard(pick, 'gy'); log(`${pn(s)} descarta ${cn(pick)}.`); return true; }
+  return false;
+}
+Object.assign(XOPS, {
+  cdMay(op, ctx) { // bots: pay only what is cheap
+    const s = ctx.seat; const src = ctx.src ? (G.cards[ctx.src.id] || ctx.src) : null;
+    for (const c of op.cost.any || [op.cost]) {
+      const cands = cdCands(c, s, src);
+      if (cands === true) { if (c.discardHand ? G.p[s].hand.length <= 2 : G.p[s].life > c.life + 8) { cdPay(c, s); runOpsAI(op.ops, ctx); } return; }
+      const w = c.blight ? bestBy(cands, x => (T(x) > c.blight ? 10 : 0) - value(x) * 0.5 + (x.token ? 2 : 0)) : bestBy(cands, x => -value(x) - (x.token ? 3 : 0));
+      if (!w) continue;
+      const cheap = c.discard || c.exHand || c.bottomHand ? G.p[s].hand.length >= 2 : c.self || c.rmSelf || c.exGy != null ? true : c.blight ? T(w) > c.blight || w.token : (w.token || value(w) < 4) && !w.isCmd;
+      if (cheap && cdPay(c, s, w)) { runOpsAI(op.ops, ctx); return; }
+    }
+  }
+});
+Object.assign(XPROMPT, {
+  async cdMay(op, pr) {
+    const s = pr.ctx.seat; const src = pr.ctx.src ? (G.cards[pr.ctx.src.id] || pr.ctx.src) : null;
+    const opts = (op.cost.any || [op.cost]).filter(c => { const k = cdCands(c, s, src); return k === true || k.length; });
+    if (!opts.length) { log(`${pr.title}: no puedes ${cdCostText(op.cost)}.`); return; }
+    const yes = __R(ME, G, await askYesNo(`${pr.title}: ¿${cdCostText(op.cost)}?`, 'Si lo haces: ' + op.ops.map(opText).join(', ')));
+    if (!yes) return;
+    let c = opts[0];
+    if (opts.length > 1) { const i = __R(ME, G, await askYesNo(`${pr.title}: ¿${cdCostText(opts[0])}?`, `«No» = ${cdCostText(opts[1])}`)); c = i ? opts[0] : opts[1]; }
+    const cands = cdCands(c, s, src); let pick = null;
+    const verb = c.discard ? 'descartar' : c.blight ? 'recibe los contadores −1/−1' : c.bottomHand ? 'poner en el fondo de tu biblioteca' : c.exHand || c.exGy != null || c.self === 'exile' ? 'exiliar' : 'sacrificar';
+    if (cands !== true) { pick = cands.length === 1 && (c.self || c.rmSelf) ? cands[0] : __R(ME, G, await pickFromList(cands, `${pr.title}: elige ${c.blight ? 'la criatura que ' : 'qué '}${verb}`)); if (!pick) return; }
+    if (!cdPay(c, s, pick)) return;
+    const n1 = UI.prompts.length; userOps(op.ops, pr.ctx, pr.ctx.src); __R(ME, G, await resolveNewPrompts(n1));
+  }
+});
+XTEXT.cdMay = op => `Puedes ${cdCostText(op.cost)}. Si lo haces: ` + op.ops.map(opText).join(', ');
+{ const _pe = parseEffects; parseEffects = function (s) { return cdParse(s, _pe); }; }
+{ const _ex = eoeX; eoeX = function (op, ctx) { if (op && op.cnd) { if (!cdOk(op.cnd, ctx)) return { k: 'noop' }; op = Object.assign({}, op); delete op.cnd; } return _ex(op, ctx); }; }
+{ const _ot = opText; opText = function (op) { const t = _ot(op && op.cnd ? Object.assign({}, op, { cnd: undefined }) : op); if (!op || !op.cnd) return t; const c = op.cnd.not ? op.cnd.not : op.cnd; return `${op.cnd.not ? 'Si NO' : 'Si'} se cumple «${esc(c.text || '')}»: ${t}`; }; }
 
 </script>
 
