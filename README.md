@@ -49,13 +49,22 @@ La [ampliación del motor y del catálogo de reglas](https://github.com/piconcd/
 | Cobertura | Auditoría parcial de habilidades no reconocidas, con avisos a los jugadores correspondientes. |
 | Pruebas | Nuevos casos de regresión del catálogo, horario de Madrid, habilidades opcionales y contadores. |
 
-**Estado de cobertura:** el motor todavía no implementa todas las reglas ni todas las cartas. Quedan pendientes, entre otras, las prioridades y la pila de habilidades disparadas, las capas y los efectos de reemplazo completos, las mecánicas de Avatar y las interacciones complejas. La actualización de datos no convierte automáticamente el reglamento en código ejecutable: una mecánica nueva que el intérprete no admita necesitará desarrollo. Las pruebas completas multijugador y ARM64 están pendientes de validación.
+**Estado de cobertura (auditoría del 26 de noviembre de 2026):** el motor es operativo, pero no es un simulador íntegro de Magic. La pila de hechizos y habilidades, prioridad APNAP, objetivos y costes transaccionales, capas, reemplazos, acciones basadas en estado, combate, reglas completas de Commander y mecánicas de Avatar requieren desarrollo y pruebas adicionales. Los avisos del intérprete son orientativos y no certifican la legalidad de los mazos ni la ejecución de todos los efectos.
 
-Más información: [estado del motor de reglas](docs/migration-status.md).
+| Prioridad | Próximos bloques de desarrollo |
+| --- | --- |
+| P0 | Núcleo de objetos/eventos, pila LIFO, prioridad, disparadas y elecciones, costes/objetivos, reemplazos, capas y acciones basadas en estado. |
+| P1 | Combate conforme al reglamento vigente, reglas de Commander y multijugador, validación de mazos, palabras clave y cobertura de cartas Oracle. |
+| P2 | Pruebas de integración exhaustivas, privacidad, reconexión, persistencia y rendimiento en Raspberry Pi/ARM64. |
+
+El objetivo es un único motor nativo que ejecute todas las reglas aplicables, con las mismas acciones legales para humanos y bots. Descargar datos de Oracle y las Comprehensive Rules no genera automáticamente nuevas implementaciones. No se publica un porcentaje de conformidad hasta contar con una matriz verificable por regla, carta e interacción.
+
+- [Auditoría técnica y estado actual](docs/migration-status.md).
+- [Plan de conformidad, fases y criterios de aceptación](docs/rules-engine-migration.md).
 
 ### Pruebas y seguimiento
 
-Las correcciones se probarán durante las partidas reales en la instalación habitual; no es necesario montar otro servidor. Las pruebas automáticas de GitHub Actions complementan este proceso, pero no certifican una partida completa ni todas las interacciones de Magic.
+Las correcciones se probarán durante las partidas reales en la instalación habitual; no es necesario montar otro servidor. Las pruebas automáticas de GitHub Actions complementan este proceso, pero no certifican una partida completa ni todas las interacciones de Magic. Para comprobar el código localmente, ejecuta `npm run check` y `node --test tests/*.test.mjs`. La auditoría de cobertura es estática; no implica una ejecución satisfactoria de CI ni de partidas reales.
 
 - [Estado de las comprobaciones en GitHub Actions](https://github.com/piconcd/mesa-commander/actions).
 - Para comunicar un fallo, indica la carta, el turno o fase, los pasos realizados y el resultado esperado. Si es posible, añade una captura sin información privada.
@@ -87,7 +96,7 @@ Puedes consultar el código públicamente. Para colaborar con permisos de escrit
 | Comunicación y servidor centralizado | `server/` |
 | Instrucciones del proyecto | `README.md` |
 | Contenedor y despliegue | `compose.yaml`, `Dockerfile`, `deploy/`, `scripts/` |
-| Motor de reglas y catálogo Oracle | `app/index.html`, `server/central.js`, `server/rules-catalog.mjs`, `docs/migration-status.md` |
+| Motor de reglas y catálogo Oracle | `app/index.html`, `server/central.js`, `server/rules-catalog.mjs`, `docs/migration-status.md`, `docs/rules-engine-migration.md` |
 | Pruebas automáticas | `tests/`, `.github/workflows/` |
 
 ### 3. Publica tu cambio
