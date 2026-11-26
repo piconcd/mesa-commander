@@ -354,6 +354,7 @@ body.netclient .host-only{display:none!important}
 .netwait{margin-top:8px;color:var(--brass2)}
 body.netclient #dbchip{display:none}
 
+.tb-warn{font-size:12.5px;font-weight:700;color:#f3c35c;background:#f3c35c1a;border:1px solid #f3c35c66;border-radius:999px;padding:2px 10px}
 /* ---- interface 2026-11 ---- */
 /* 1 · turn bar above the hand */
 .turnbar{display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;background:#1a202cd9;border:1px solid var(--line);border-left:4px solid var(--sc,var(--line2));border-radius:10px;padding:5px 10px;margin-bottom:6px;min-width:0}
@@ -5487,13 +5488,14 @@ async function gameLoop() {
       const s = G.active;
       saveCheckpoint();
       if (alive(s)) {
-        if (isBotSeat(s)) __R(ME, G, await botTurn(s)); else __R(ME, G, await asSeat(s, () => userTurn(s)));
+        try { if (isBotSeat(s)) __R(ME, G, await botTurn(s)); else __R(ME, G, await asSeat(s, () => userTurn(s))); }
+        catch (e) { if (e === ABORT || G !== g || g.killed) throw e; x27TurnError(s, e); }
       }
       if ((G !== g || g.killed || g.loopGen !== gen) || G.over) break;
-      __R(ME, G, await botEotRemoval(s));
-      if ((G !== g || g.killed) || G.over) break;
-      __R(ME, G, await botEotPlays(s));
-      if ((G !== g || g.killed) || G.over) break;
+      try { __R(ME, G, await botEotRemoval(s)); } catch (e) { if (e === ABORT || G !== g || g.killed) throw e; x27TurnError(s, e); }
+      if ((G !== g || g.killed || g.loopGen !== gen) || G.over) break;
+      try { __R(ME, G, await botEotPlays(s)); } catch (e) { if (e === ABORT || G !== g || g.killed) throw e; x27TurnError(s, e); }
+      if ((G !== g || g.killed || g.loopGen !== gen) || G.over) break;
       G.turnsTaken++;
       let n = (s + 1) % 4, guard = 0;
       while (!alive(n) && guard++ < 4) n = (n + 1) % 4;
@@ -7395,6 +7397,7 @@ async function doAct(a, el) {
     case 'mmin': UI.modalMin = true; $('#modal').hidden = true; renderPeek(); break;
     case 'mshow': UI.modalMin = false; $('#modal').hidden = false; renderPeek(); break;
     case 'pause': setPause(!UI.paused); break;
+    case 'x27unstick': x27Unstick(); break;
     case 'copylog': { const txt = (G ? G.log : []).map(e => { const d = document.createElement('div'); d.innerHTML = logFor(e, 0); return (e.c === 't' ? '\n== ' : '') + d.textContent; }).join('\n');
       const fallback = () => { try { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([txt], { type: 'text/plain' })); a.download = 'registro-partida.txt'; document.body.appendChild(a); a.click(); a.remove(); toast('Registro descargado como archivo.'); } catch (e2) { toast('No se pudo copiar el registro.', true); } };
       try { navigator.clipboard.writeText(txt).then(__B(() => toast('Registro copiado: pégalo en el chat.')), fallback); } catch (e1) { fallback(); } break; }
@@ -13534,6 +13537,9 @@ function turnbarHTML() {
   const mine = a === ME && !G.p[ME].isBot;
   let acts = '';
   if (G.over) acts = `<span class="tb-hint">${G.winner != null ? esc(G.p[G.winner].name) + ' ha ganado.' : 'Partida terminada.'}</span>`;
+  else if (UI.paused) acts = `<span class="tb-warn">⏸ Partida en pausa: los bots esperan</span><button class="btn sm pri" data-act="pause">▶ Seguir <kbd>P</kbd></button>`;
+  else if (UI.prompts.length && !UI.modalKind) acts = `<span class="tb-warn">Tienes ${UI.prompts.length === 1 ? 'un efecto pendiente' : UI.prompts.length + ' efectos pendientes'}: ${esc(UI.prompts[0].title || '')}</span><button class="btn sm pri" data-act="presolve" data-id="${UI.prompts[0].id}">Resolver</button>`;
+  else if (UI.x27Stuck && !mine) acts = `<span class="tb-warn">La partida parece atascada en el turno de ${esc(p.name)}</span><button class="btn sm pri" data-act="x27unstick">Forzar a seguir</button>`;
   else if (mine) {
     const canAtk = G.phase === 'main' && !G.p[ME].attacked;
     if (UI.attack) {
@@ -14113,6 +14119,66 @@ for (const k of ['sacArtCre', 'edict', 'eachDiscard', 'syphon', 'mangler', 'fxOp
 // archfiend and "each player sacrifices a creature" are edicts
 XPROMPT.archfiend = async function (op, pr) { __R(ME, G, await chRunAsync(CHGEN.edict(pr.ctx.seat, { each: false, n: 1, maxPow: true, gain: op.gain }, pr.ctx))); render(); };
 XPROMPT.fxEachSac = async function (op, pr) { __R(ME, G, await chRunAsync(CHGEN.edict(pr.ctx.seat, { each: true, n: 1 }, pr.ctx))); render(); };
+
+/* Fandaniel, Telophoroi Ascian: each opponent chooses whether to sacrifice a nontoken creature or lose life */
+function x27FandN(s) { return 2 * G.p[s].gy.filter(id => /\b(instant|sorcery)\b/i.test(G.defs[G.cards[id].n].type_line || '')).length; }
+CHGEN.fxFandaniel = function* (s, op, ctx) {
+  const title = chTitle(ctx, 'Fandaniel'); const n = x27FandN(s);
+  if (!n) { log(`${esc(title)}: no hay instantáneos ni conjuros en el cementerio de ${pn(s)}; nadie pierde vidas.`); return; }
+  const picks = [], lose = [];
+  for (const o of apnapOrder(oppsOf(s).filter(alive))) {
+    const list = permsOf(o).filter(c => isCreature(c) && !c.token);
+    if (!list.length) { lose.push(o); continue; }
+    const best = fxPickBest(list, c => -value(c));
+    const aiSac = !!best && (n >= 4 || value(best) < 2) && !(best.isCmd && n < G.p[o].life - 4);
+    const i = yield { t: 'ask', o, title: `${title}: sacrifica una criatura que no sea ficha o pierde ${n} vidas`, labels: ['Sacrificar una criatura', `Perder ${n} vidas`], ai: () => (aiSac ? 0 : 1) };
+    if (+i !== 0) { lose.push(o); continue; }
+    const c = list.length === 1 ? list[0] : yield { t: 'pick', o, list, title: `${title}: elige la criatura que sacrificas`, ai: l => fxPickBest(l, x => -value(x)) };
+    if (c) picks.push([o, c]); else lose.push(o);
+  }
+  for (const [o, c] of picks) if (c.zone === 'bf') { sacrifice(c); log(`${pn(o)} sacrifica ${cn(c)} para no perder ${n} vidas (${esc(title)}).`); }
+  for (const o of lose) if (alive(o)) { loseLife(o, n); log(`${pn(o)} pierde ${n} vidas (${esc(title)}).`, 'bad'); }
+};
+CHWHO.fxFandaniel = s => (x27FandN(s) ? oppsOf(s).filter(alive) : []);
+XOPS.fxFandaniel = function (op, ctx) { chGo('fxFandaniel', ctx.seat, op, ctx); };
+XPROMPT.fxFandaniel = async function (op, pr) { __R(ME, G, await chRunAsync(CHGEN.fxFandaniel(pr.ctx.seat, op, pr.ctx))); render(); };
+
+/* ---------- a stuck turn never blocks the whole game ---------- */
+function x27TurnError(s, e) {
+  console.error('turn error', e);
+  try { log(`Error interno en el turno de ${pn(s)} (${esc(String(e && e.message || e).slice(0, 140))}). La partida sigue con el siguiente jugador.`, 'bad'); } catch (_) { }
+  try { UI.busy = false; UI.attack = null; UI.passRes = null; G.phase = 'end'; G.stack = null; for (const c of permsAll()) { c.tp = 0; c.tt = 0; c.tkw = []; c.dmg = 0; c.dt = false; c.atk = null; c.blocking = null; } sba(); render(); } catch (_) { }
+}
+function x27Unstick() {
+  if (!G || G.over) return;
+  const s = G.active; UI.x27Stuck = false;
+  log(`Se fuerza el final del turno de ${pn(s)} (la partida estaba atascada).`, 'bad');
+  try { console.warn('x27 unstick', JSON.stringify({ turn: G.turnsTaken, active: s, phase: G.phase, stack: G.stack, pcast: (G.pcast || []).length, log: G.log.slice(-15).map(l => (l.h || '').replace(/<[^>]+>/g, '')) })); } catch (_) { }
+  for (let k = 0; k < 4; k++) { try { const u = UIS[k]; if (u.reveal && u.reveal.res) { const r = u.reveal.res; u.reveal = null; r(); } u.busy = false; u.interrupting = false; } catch (_) { } }
+  try { dropReveal(); closeModal(); } catch (_) { }
+  try { for (const c of permsAll()) { c.tp = 0; c.tt = 0; c.tkw = []; c.dmg = 0; c.dt = false; c.atk = null; c.blocking = null; } } catch (_) { }
+  G.stack = null; G.pcast = []; G.phase = 'end';
+  G.turnsTaken++;
+  let n = (s + 1) % 4, guard = 0; while (!alive(n) && guard++ < 4) n = (n + 1) % 4;
+  const firstAlive = (() => { let f = G.first, k = 0; while (!alive(f) && k++ < 4) f = (f + 1) % 4; return f; })();
+  if (n === firstAlive) G.round++;
+  G.active = n; render();
+  asSeat(homeSeat(), gameLoop);
+}
+// watchdog: a bot turn with no progress for 25 s and nothing waiting for a human
+(function x27Watchdog() {
+  let lastSig = '', lastT = Date.now();
+  setInterval(() => {
+    try {
+      if (!G || G.over || (typeof NET !== 'undefined' && NET.mode === 'client')) { UI.x27Stuck = false; return; }
+      const sig = [G.turnsTaken, G.active, G.phase, G.log.length, G.stack].join('|');
+      if (sig !== lastSig) { lastSig = sig; lastT = Date.now(); if (UIS.some(u => u.x27Stuck)) { UIS.forEach(u => u.x27Stuck = false); render(); } return; }
+      const waitingHuman = humanSeats().some(h => { const u = UIS[h]; return u.reveal || u.modalKind || u.prompts.length || u.paused || u.mullStage || u.targeting; }) || UI.paused;
+      if (!isBotSeat(G.active) || waitingHuman) { lastT = Date.now(); return; }
+      if (Date.now() - lastT > 25000 && !UIS.some(u => u.x27Stuck)) { for (const h of humanSeats()) UIS[h].x27Stuck = true; render(); }
+    } catch (e) { }
+  }, 3000);
+})();
 // bots (and effects applied directly): same effects, asking the humans that have to choose
 Object.assign(XOPS, {
   eachDiscard(op, ctx) { chGo('eachDiscard', ctx.seat, op, ctx); },
@@ -14144,4 +14210,4 @@ const XPROMPT_T = {
 <script src="/config.js"></script>
 <script src="/central.js"></script>
 <script src="/voice.js"></script>
-</body></html>
+</body></html>
