@@ -2311,6 +2311,8 @@ function manaUnits(s, excl, cost) {
     else if (cost && cost.convoke && !c.tapped && isCreature(c) && !m.noTap) units.push({ c, cols: [], sac: false, improv: true, hurt: 3 });
     for (const b of bonusMana(c, s)) units.push({ c, cols: b, sac: false, hurt: 0 });
   }
+  // waterbend {N}: up to N of the generic mana can be paid by tapping untapped artifacts and creatures, {1} each
+  if (cost && cost.wb > 0) for (const c of permsOf(s)) if (c !== excl && !c.tapped && (isCreature(c) || isType(c, 'artifact')) && !units.some(u => u.c === c && u.improv)) units.push({ c, cols: [], sac: false, improv: true, wb: true, hurt: 3 });
   units.sort((a, b) => ((a.pool != null ? 0 : 1) - (b.pool != null ? 0 : 1)) || (a.sac - b.sac) || ((a.hurt || 0) - (b.hurt || 0)) || (a.cols.length - b.cols.length));
   return units;
 }
@@ -2336,7 +2338,8 @@ function solve(s, cost, excl, poolOnly = false) {
   const onlyC = u => (u.cols.length && u.cols.every(x => x === 'C')) ? 0 : 1;
   const heavy = u => ((u.hurt || 0) >= 2 ? 1 : 0);
   const order = units.map((u, j) => j).filter(j => !used[j]).sort((a, b) => ((units[a].pool != null ? 0 : 1) - (units[b].pool != null ? 0 : 1)) || (units[a].sac - units[b].sac) || (heavy(units[a]) - heavy(units[b])) || (onlyC(units[a]) - onlyC(units[b])) || ((units[b].c && usedCards.has(units[b].c) ? 1 : 0) - (units[a].c && usedCards.has(units[a].c) ? 1 : 0)) || ((units[a].hurt || 0) - (units[b].hurt || 0)) || (units[a].cols.length - units[b].cols.length));
-  for (const j of order) { if (need <= 0) break; if (units[j].improv && units[j].c && units.some((u, k) => used[k] && u.c === units[j].c)) continue; if (!units[j].improv && units[j].c && units.some((u, k) => used[k] && u.improv && u.c === units[j].c)) continue; used[j] = true; need--; }
+  let wbN = 0;
+  for (const j of order) { if (need <= 0) break; if (units[j].wb && wbN >= (cost.wb || 0)) continue; if (units[j].improv && units[j].c && units.some((u, k) => used[k] && u.c === units[j].c)) continue; if (!units[j].improv && units[j].c && units.some((u, k) => used[k] && u.improv && u.c === units[j].c)) continue; used[j] = true; need--; if (units[j].wb) wbN++; }
   if (need > 0) return null;
   const sel = units.filter((u, j) => used[j]);
   const pipCards = new Set(units.filter((u, j) => used[j] && u.c && u.forPip).map(u => u.c));
@@ -3774,7 +3777,7 @@ function applyOp(op, ctx, t) {
   if (t && t.id != null && t.zone === 'bf' && t.ctl !== s && needsTarget(op)) {
     const w = wardOf(t); const paid = ctx.wardPaid || (ctx.wardPaid = new Set());
     if (w && !paid.has(t.id)) {
-      const sol = solve(s, { generic: w, pips: [] });
+      const sol = solve(s, { generic: w, pips: [], wb: AB(t).avWardWb ? w : 0 });
       const doPay = sol && (isBotSeat(s) ? true : pref(s, 'autoTap'));
       if (doPay) { pay(s, sol); paid.add(t.id); log(`${pn(s)} paga {${w}} por el resguardo de ${cn(t)}.`); }
       else if (!isBotSeat(s) && !pref(s, 'autoTap')) { paid.add(t.id); asSeat(s, () => log(`Resguardo {${w}} de ${cn(t)}: recuerda pagarlo (giro de maná manual).`)); }
@@ -14230,7 +14233,8 @@ const XPROMPT_T = {
    · Earthbend N: «Target land you control becomes a 0/0 creature with haste that's still a land. Put N +1/+1
      counters on it. When it dies or is exiled, return it to the battlefield tapped.»
    · Firebending N: «Whenever a creature with firebending N attacks, add N {R}. This mana lasts until end of combat.»
-   Waterbend and «whenever you …bend» are not handled here yet.
+   · Waterbend {N}: «While paying a waterbend cost, you can tap your artifacts and creatures to help. Each one pays for {1}.»
+   «Whenever you …bend» is not handled here yet.
    ===================================================================== */
 function avSentence(t) {
   let m;
@@ -14321,6 +14325,30 @@ Object.assign(XTEXT, {
 }; }
 // firebending mana only lasts until end of combat
 { const _ac = ewAfterCombat; ewAfterCombat = function (s) { for (const p of G.p) if (p.pool && p.pool.some(u => u.avCombat)) p.pool = p.pool.filter(u => !u.avCombat); return _ac.apply(this, arguments); }; }
+// waterbend costs: activated abilities («waterbend {N}[, {T}]: …», also after «exhaust —»), a mandatory additional cost
+// to cast the spell, and «ward—waterbend {N}». The effect must be understood; if not, the line stays unrecognised.
+function avWaterLine(a, l, PE, inner) {
+  const t = l.replace(/\.$/, '');
+  let m = t.match(/^as an additional cost to cast this spell, waterbend \{(\d+)\}$/);
+  if (m) { a.avWbAdd = +m[1]; return true; }
+  m = l.match(/^(exhaust — )?waterbend \{(\d+)\}((?:, \{t\})?): (.+)$/);
+  if (!m) return false;
+  if (/sacrifice ~/.test(m[4])) return false; // «sacrifice ~. if you do, …»: the parser would drop the sacrifice
+  const N = +m[2]; const rw = `${m[1] || ''}{${N}}${m[3]}: ${m[4]}`;
+  const n0 = a.acts.length, nm = a.manual.length;
+  let ok = false;
+  if (m[1]) ok = inner(a, rw, PE) && a.acts.length > n0 && a.manual.length === nm;
+  else { const act = parseAct(rw, rw); if (act && !act.manual) { a.acts.push(act); ok = true; } }
+  if (!ok) { a.acts.length = n0; a.manual.length = nm; return false; }
+  for (const act of a.acts.slice(n0)) { act.wb = N; act.text = l; }
+  return true;
+}
+{ const _el = eoeLine; eoeLine = function (a, l, PE) { if (avWaterLine(a, l, PE, _el)) return true; return _el(a, l, PE); }; }
+{ const _alw = actLabel; actLabel = function (act) { const r = _alw(act); return act && act.wb ? r.replace(`{${act.generic}}`, `waterbend {${act.wb}}`) : r; }; }
+{ const _acw = actCost; actCost = function (act, s, x) { const r = _acw(act, s, x); if (act && act.wb && r) r.wb = Math.min(act.wb, r.generic); return r; }; }
+{ const _fcw = fullCost; fullCost = function (c, s) { const r = _fcw(c, s); const n = abOf(D(c)).avWbAdd; if (n && r) { r.generic += n; r.wb = (r.wb || 0) + n; } return r; }; }
+// «ward—waterbend {N}» is a keyword line, read before the line hooks: add it once the card has been read
+{ const _abw = abOf; const done = new WeakSet(); abOf = function (d) { const r = _abw(d); if (r && r !== EMPTY_AB && d && !done.has(r)) { done.add(r); const m = String(d.oracle_text || '').toLowerCase().match(/^ward—waterbend \{(\d+)\}/m); if (m) { r.ward = Math.max(r.ward || 0, +m[1]); r.avWardWb = true; } } return r; }; }
 
 </script>
 
