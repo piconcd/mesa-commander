@@ -48,3 +48,10 @@ Cambios activos en `app/index.html`:
 - La ruta de contrahechizo envía al cementerio o exilio según flashback, antes de las comprobaciones de estado; se corrige un caso de disparadas de muerte al aplicar exilio en lugar de morir.
 
 Estas son correcciones parciales sobre el motor existente; no garantizan conformidad universal. Se ha comprobado la sintaxis del script HTML y del núcleo, pero no se han ejecutado las nuevas pruebas funcionales ni partidas. La regla de leyendas, la resolución simultánea, los efectos de capas y reemplazo reales, las cuatro mecánicas de bending, todos los costes/objetivos y las cartas Oracle siguen pendientes de integración general.
+
+
+## Máquina de partidas experimental
+
+`server/engine/game.mjs` amplía el núcleo con comandos versionados y estado serializable, costes de maná, objetivos, pila, disparadas, decisiones, fases, combate parcial y vistas privadas. Los efectos se describen mediante operaciones declarativas; no se ejecuta texto Oracle. Las pruebas nuevas están en `tests/native-rules-game.test.mjs`. Seis escenarios superados en un entorno JavaScript aislado; falta confirmar CI y la ejecución nativa de Node.js.
+
+La integración con Chromium, los bots, el catálogo de cartas, la reconexión y persistencia de producción, las capas/reemplazos generales y la conformidad integral siguen pendientes. No se cambia el motor activo ni se certifica cobertura universal.

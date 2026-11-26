@@ -62,9 +62,24 @@ El objetivo es un único motor nativo que ejecute todas las reglas aplicables, c
 - [Auditoría técnica y estado actual](docs/migration-status.md).
 - [Plan de conformidad, fases y criterios de aceptación](docs/rules-engine-migration.md).
 
-### Avance del motor nativo
+### Avance del motor nativo — 26 de noviembre de 2026
 
-Se han incorporado correcciones activas de Commander, restricciones de tierras y lanzamientos, y un núcleo independiente de reglas en `server/engine/core.mjs` con pruebas específicas. El nuevo núcleo aún no dirige las partidas reales: su integración con las cartas y la interfaz sigue pendiente. **No se ha alcanzado la compatibilidad completa**. Consulta el [detalle de la entrega](docs/migration-status.md).
+El núcleo independiente `server/engine/core.mjs` cuenta ahora con una máquina de partidas experimental en `server/engine/game.mjs`, con las funciones `createGame`, `dispatch` y `view`. No depende del DOM ni de Chromium.
+
+| Bloque | Implementación experimental |
+| --- | --- |
+| Pila y prioridad | Pila LIFO, pases sucesivos, contrahechizos, disparadas y orden APNAP. |
+| Comandos | Validación de versión, costes de maná, acciones transaccionales y objetivos. |
+| Estado | Identidad por cambio de zona, muertes en lote, regla de leyendas y contadores opuestos. |
+| Commander | Impuesto, decisiones individuales de zona de mando, daño de comandante y eliminación de jugadores (parcial). |
+| Turnos y combate | Fases, declaración de atacantes y bloqueadores, asignación de daño, dañar primero/dos veces y arrollar (subconjunto). |
+| Privacidad | Vista por jugador que oculta manos ajenas y bibliotecas. |
+| Cartas | Definiciones declarativas implementadas explícitamente; las cartas sin implementación se rechazan. |
+
+**Importante:** el motor nuevo aún no dirige las partidas reales; Chromium conserva la autoridad. No se ha conectado la interfaz, el catálogo Oracle, los bots ni la persistencia al núcleo nuevo. No es una implementación completa del reglamento: faltan capas y reemplazos generales, costes especiales, legalidad de mazos, numerosas habilidades y cartas, y pruebas integrales. Los cambios no modifican el despliegue existente.
+
+Pruebas del nuevo núcleo: `node --test tests/native-rules-game.test.mjs` y `node --test tests/native-rules-core.test.mjs`. Los seis escenarios nuevos se han comprobado en un entorno JavaScript aislado; queda pendiente la ejecución completa de Node.js y CI. Consulta el [detalle de la entrega](docs/migration-status.md).
+
 
 ### Pruebas y seguimiento
 

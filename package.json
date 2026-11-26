@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "scripts": { "start": "node server/index.mjs", "check": "node --check server/index.mjs && node --check server/central.js" },
-  "dependencies": { "playwright": "1.65.1", "ws": "8.23.0" }
+  "scripts": {
+    "start": "node server/index.mjs",
+    "check": "node --check server/index.mjs && node --check server/central.js && node --check server/engine/core.mjs && node --check server/engine/game.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.65.1",
+    "ws": "8.23.0"
+  }
 }

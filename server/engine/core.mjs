@@ -34,7 +34,7 @@ export function changeZone(s, ref, to, {controller}={}) {
     obj.zone=to; obj.generation++;
     obj.controller=controller??obj.owner;
     // These are properties of a game object, not of its physical card.
-    for (const k of ['damage','counters','attachments','tapped','temporary','combat','phased']) delete obj[k];
+    for (const k of ['damage','counters','attachments','tapped','temporary','combat','phased','deathtouchDamage','sick','commandPending']) delete obj[k];
   }
   return { lastKnown, object:reference(obj) };
 }
@@ -76,11 +76,12 @@ export function putTriggers(s, orders={}) {
 }
 export function grantPriority(s, player=s.active) {
   requireSeat(s,player);
+  if (s.ready!==null) throw Error('Resolve ready stack object first');
   if (s.pending.length || s.decision) throw Error('Resolve SBAs/trigger ordering/decisions first');
   s.priority=player; s.passes=[]; s.ready=null;
 }
 export function passPriority(s, player) {
-  if (s.pending.length || s.decision || player!==s.priority) throw Error('No priority');
+  if (s.pending.length || s.decision || s.priority===null || player!==s.priority) throw Error('No priority');
   s.passes.push(player);
   if (s.passes.length<s.seats.length) {
     s.priority=nextSeat(s,player); return {kind:'priority',player:s.priority};
@@ -104,7 +105,9 @@ export function resolveTop(s, id, legalTarget, resolve) {
 export function counter(s,id) {
   const i=s.stack.findIndex(x=>x.id===id);
   if(i<0 || s.stack[i].uncounterable) return null;
-  return s.stack.splice(i,1)[0];
+  const item=s.stack.splice(i,1)[0];
+  if(s.ready===id)s.ready=null;
+  return item;
 }
 // Rule 616: caller supplies the correct priority class and the affected player's choice.
 // Re-evaluate applicability after each transformation; no effect applies twice to an event.
