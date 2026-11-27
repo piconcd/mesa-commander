@@ -16307,6 +16307,223 @@ Object.assign(XTEXT, {
   l12DmgExcess: o => `${o.n} de daño a una criatura; si hay exceso, ${XTEXT[o.then.k] ? XTEXT[o.then.k](o.then) : 'crear la ficha'}`, l12GyDmgCtl: o => `Puedes exiliar una carta de tu cementerio: ${o.n} de daño al controlador`, l12Wise: o => `La criatura se hace daño igual a su fuerza; si ataca, ${o.n} de daño a su controlador`,
   l12Double: () => 'Doblar la fuerza y la resistencia de una criatura', l12LookTwo: () => 'Mirar 2: una a la mano y otra al cementerio', l12DiscTutor: () => 'Puedes descartar una carta para buscar en tu biblioteca', l12AloneDo: () => 'La criatura que ataca sola mejora hasta final de turno'
 });
+/* =====================================================================
+   Tanda 13 (group 2 of the «easy» cards of the ten sets).
+   · «During your turn, …» / «During an opponent's turn, …» inside a trigger (Starfleet Security, Nightmare Sower,
+     Voracious Tome-Skimmer).
+   · -1/-1 counters that go away: «remove a -1/-1 counter from ~», «while it has a -1/-1 counter on it, …».
+   · Library: «reveal cards until you reveal two lands / a creature card», «reveal the top five … a land onto the
+     battlefield tapped and the rest into your graveyard», «look at the top five … you may put a creature card onto the
+     battlefield», «… if you didn't put a card into your hand this way, put a +1/+1 counter on ~», «mill three. Then
+     return a land card … If you can't, create a Treasure», «you may search for a Food card … if you don't, create a Food».
+   · Effects about the creature that entered / died / the damage dealt («it», «that creature», «that many»): Aunt May,
+     Madame Null, Hulkling, South Wind Avatar, Venus, Ares, Captain Janeway (explore), Katana / Doc Ock's Tentacles.
+   · Tokens with quoted text (Zabu, Moloid, The Void, Sculpture Treasure), Cadet with haste until end of turn.
+   · Single effects: Borrowed Knowledge, Perfect Intimidation, Mister Hyde, Test of Identity, Targ Wrangler, Molten Man,
+     Beckett Mariner, Romulan Bird-of-Prey / Sarcophagus, Wingnut, Salt Vampire, Mister Negative, The Unicomplex,
+     Unbury, Selfless Safewright, Terrapact Intimidator, Spider-Woman, Blech.
+   ===================================================================== */
+const l13Src = ctx => ctx && ctx.src ? (G.cards[ctx.src.id] || ctx.src) : null;
+const l13It = ctx => { const c = ctx && (ctx.entered || ctx.died); return c ? (G.cards[c.id] || c) : null; };
+const L13_COLS = '(white|blue|black|red|green|colorless)(?: and (white|blue|black|red|green))?';
+const l13Cols = (a, b) => [a, b].map(x => L12_COL[x]).filter(Boolean);
+const l13Cap = w => String(w).split(' ').map(x => x ? x[0].toUpperCase() + x.slice(1) : x).join(' ');
+const l13Up = w => { const x = String(w); return x ? x[0].toUpperCase() + x.slice(1) : x; };
+const l13TypeOk = (d, w) => new RegExp('\\b' + FX_SING(w) + '\\b', 'i').test(d && d.type_line || '');
+// toughness when it left the battlefield (South Wind Avatar)
+{ const _mc13 = moveCard; moveCard = function (c, to) { try { if (c && c.zone === 'bf' && to !== 'bf') { c._l13Atk = c.atk != null; if (isCreature(c)) c._l13T = T(c); } } catch (e) { console.error(e); } return _mc13.apply(this, arguments); }; }
+// «Whenever ~ is dealt damage, put that many +1/+1 counters on her» (Venus)
+{ const _dd13 = dealDamage; dealDamage = function (c, n, src) {
+  const d0 = c && c.zone === 'bf' ? (c.dmg || 0) : null; const r = _dd13.apply(this, arguments);
+  try { if (d0 != null && c.zone === 'bf' && AB(c).l13DmgCtr) { const got = (c.dmg || 0) - d0; if (got > 0) setTimeout0(() => trigger(c, [{ k: 'l13CtrN', n: got }])); } } catch (e) { console.error(e); }
+  return r;
+}; }
+// «Artifacts and creatures your opponents control enter tapped» (Spider-Woman)
+{ const _oe13 = onEnter; onEnter = function (c) {
+  try { if (G && c && c.zone === 'bf' && !c.tapped && (isCreature(c) || isType(c, 'artifact')) && permsAll().some(x => x.ctl !== c.ctl && AB(x).l13OppTapped)) { c.tapped = true; log(`${cn(c)} entra girado.`); } } catch (e) { console.error(e); }
+  return _oe13.apply(this, arguments);
+}; }
+{ const _co13 = cdOk; cdOk = function (sp, ctx) { if (sp && sp.k === 'l13turn') return !!ctx && G && (G.active === ctx.seat) === !!sp.mine; return _co13(sp, ctx); }; }
+{ const _fc13 = fxCond; fxCond = function (cond, s, c) { if (cond === 'l13notcre') return !!c && !isCreature(c); return _fc13(cond, s, c); }; }
+
+/* ---------- lines ---------- */
+function l13Line(a, l) {
+  let m; const t = l.replace(/\.$/, '');
+  if (/^(?:[a-z' ]+ — )?artifacts and creatures your opponents control enter tapped$/.test(t)) { a.l13OppTapped = true; return true; }
+  // the old «another creature dies» / «is dealt damage» triggers do not say which creature died or how much damage
+  if (/^whenever another creature you control dies, you gain life equal to its toughness$/.test(t))
+    return x26Trig(a, { ev: 'dies', who: 'you', self: true, run: (x, info) => { const c = info.c; if (!c || c.id === x.id || x.zone !== 'bf') return; const n = Math.max(0, c._l13T != null ? c._l13T : basePT(D(c).toughness)); if (n) trigger(x, [{ k: 'gain', n }]); } });
+  if (/^whenever an attacking creature you control dies, return that card to its owner's hand$/.test(t))
+    return x26Trig(a, { ev: 'dies', who: 'you', self: true, run: (x, info) => { const c = info.c; if (!c || !c._l13Atk) return; trigger(x, [{ k: 'l13ItToHand', id: c.id }]); } });
+  if (/^whenever ~ is dealt damage, put that many \+1\/\+1 counters on (?:her|him|it|~)$/.test(t)) { a.l13DmgCtr = true; return true; }
+  if ((m = t.match(/^as long as ~ isn't a creature, it has ([a-z]+)$/)) && KW_LIST.includes(m[1])) { (a.selfCond ||= []).push({ cond: 'l13notcre', p: 0, t: 0, kw: [m[1]] }); return true; }
+  return false;
+}
+{ const _el13 = eoeLine; eoeLine = function (a, l, PE) { if (l13Line(a, l)) return true; return _el13(a, l, PE); }; }
+
+/* ---------- sentences ---------- */
+function l13Sentence(s, pe) {
+  let m;
+  if ((m = s.match(/^during (your|an opponent's) turn, (.+)$/))) { const ops = parseEffects(m[2]); if (!ops.length || ops.some(o => o.cnd)) return null; const cnd = { k: 'l13turn', mine: m[1] === 'your', text: m[1] === 'your' ? "it's your turn" : "it's an opponent's turn" }; return ops.map(o => Object.assign({}, o, { cnd })); }
+  if (/^(?:while (?:it|~) has a -1\/-1 counter on it, )?remove a -1\/-1 counter from (?:it|~)$/.test(s)) return [{ k: 'l13RmM1' }];
+  if ((m = s.match(/^mill (\w+) cards\. then return a land card from your graveyard to your hand\. if you can't, create a treasure token$/)) && cdNum(m[1]) > 0) return [{ k: 'l13Conq', n: cdNum(m[1]) }];
+  if ((m = s.match(/^reveal the top (\w+) cards of your library\. put a land card from among them onto the battlefield tapped and the rest into your graveyard$/)) && cdNum(m[1]) > 0) return [{ k: 'l13HitIt', n: cdNum(m[1]) }];
+  if (/^reveal cards from the top of your library until you reveal two land cards\. put those land cards onto the battlefield tapped and the rest on the bottom of your library in a random order$/.test(s)) return [{ k: 'l13RevLands', n: 2 }];
+  if (/^reveal cards from the top of your library until you reveal a creature card\. put that card onto the battlefield tapped and attacking and the rest on the bottom of your library in a random order$/.test(s)) return [{ k: 'l13RevCreAtk' }];
+  if ((m = s.match(/^look at the top (\w+) cards of your library\. you may put an? ([a-z]+) card from among them onto the battlefield\. put the rest on the bottom of your library in a random order$/)) && cdNum(m[1]) > 0) return [{ k: 'l13DigBf', n: cdNum(m[1]), f: m[2] }];
+  if ((m = s.match(/^look at the top (\w+) cards of your library\. you may reveal an? ([a-z]+) card from among them and put it into your hand\. put the rest on the bottom of your library in a random order\. if you didn't put a card into your hand this way, put a \+1\/\+1 counter on ~$/)) && cdNum(m[1]) > 0) return [{ k: 'l13DigOrCtr', n: cdNum(m[1]), f: m[2] }];
+  if ((m = s.match(/^you may search your library for an? ([a-z]+) card, reveal it, put it into your hand, then shuffle\. if you don't put a card into your hand this way, (create an? [a-z]+ token)$/))) { const tk = pe(m[2]); if (tk.length !== 1) return null; return [{ k: 'l13TutorOr', f: m[1], tok: tk[0] }]; }
+  if ((m = s.match(/^put a \+1\/\+1 counter on each ([a-z]+(?:, [a-z]+)*,? and [a-z]+) you control$/))) { const subs = m[1].split(/,? and |, /).map(FX_SING); if (subs.some(x => L12_TYPES.includes(x))) return null; return [{ k: 'l13CtrEach', subs }]; }
+  if (/^discard your hand, then draw cards equal to the number of cards in target opponent's hand$/.test(s)) return [{ k: 'l13Borrow', opp: true }];
+  if (/^discard your hand, then draw cards equal to the number of cards discarded this way$/.test(s)) return [{ k: 'l13Borrow', opp: false }];
+  if (/^remove all counters from target creature$/.test(s)) return [{ k: 'l13RmAll' }];
+  if ((m = s.match(/^target opponent exiles (\w+) cards from their hand$/)) && cdNum(m[1]) > 0) return [{ k: 'l13OppExile', n: cdNum(m[1]) }];
+  if (/^remove a counter from a creature you control\. if you do, draw a card$/.test(s)) return [{ k: 'l13RmDraw' }];
+  if ((m = s.match(/^discard a card\. if you do, draw (a card|two cards|three cards)$/))) return [{ k: 'l13DiscDraw', n: m[1] === 'a card' ? 1 : cdNum(m[1].split(' ')[0]) }];
+  if ((m = s.match(/^sacrifice an? (nonland permanent|land)$/))) return [{ k: 'l13SacOne', f: m[1] }];
+  if ((m = s.match(/^put a promotion counter on (?:her|him|~)\. then if there are three or more promotion counters on (?:her|him|~), remove those counters and (?:she|he|~) deals (\d+) damage to each opponent$/))) return [{ k: 'l13Beckett', n: +m[1] }];
+  if ((m = s.match(/^if ~ isn't a creature, put (a|two|three) charge counters? on (?:it|~)$/))) return [{ k: 'l13CtrIfNC', n: m[1] === 'a' ? 1 : cdNum(m[1]) }];
+  if ((m = s.match(new RegExp('^create an? (\\d+)\\/(\\d+) ' + L13_COLS + ' ([a-z ]+?) creature token named ([a-z ]+)\\. it gains haste until end of turn$')))) return [{ k: 'l13Tok', spec: { name: l13Cap(m[6]), p: +m[1], t: +m[2], colors: l13Cols(m[3], m[4]), type: 'Token Creature — ' + l13Cap(m[5]) }, haste: true }];
+  if ((m = s.match(new RegExp('^create an? (\\d+)\\/(\\d+) ' + L13_COLS + ' ([a-z ]+?) creature token named ([a-z ]+) with "(.+?)\\.?"$')))) return [{ k: 'l13Tok', spec: { name: l13Cap(m[6]), p: +m[1], t: +m[2], colors: l13Cols(m[3], m[4]), type: 'Token Creature — ' + l13Cap(m[5]), text: l13Up(m[7].replace(/~/g, 'this token')) + '.' } }];
+  if ((m = s.match(new RegExp('^create an? (\\d+)\\/(\\d+) ' + L13_COLS + ' ([a-z ]+?) artifact creature token with "(.+?)\\.?"$')))) return [{ k: 'l13Tok', spec: { name: l13Cap(m[5]), p: +m[1], t: +m[2], colors: l13Cols(m[3], m[4]), type: 'Token Artifact Creature — ' + l13Cap(m[5]), text: l13Up(m[6].replace(/~/g, 'this token')) + '.' } }];
+  if ((m = s.match(new RegExp('^(create|target opponent creates) ([a-z\' ]+), a legendary (\\d+)\\/(\\d+) ' + L13_COLS + ' ([a-z ]+?) creature token with (?:([a-z ,]+?),? and )?"(.+?)\\.?"$')))) {
+    const kws = m[8] ? l12KwList(m[8]) : []; if (m[8] && kws.join(' and ') !== m[8].replace(/,? and |, /g, ' and ')) return null;
+    const name = l13Cap(m[2]); const text = l13Up(m[9].replace(new RegExp('\\b' + m[2] + '\\b', 'g'), name)) + '.';
+    return [{ k: m[1] === 'create' ? 'l13Tok' : 'l13OppTok', spec: { name, p: +m[3], t: +m[4], colors: l13Cols(m[5], m[6]), kws, type: 'Token Legendary Creature — ' + l13Cap(m[7]), text: [kws.map(cap).join(', '), text].filter(Boolean).join('\n') } }];
+  }
+  if ((m = s.match(/^~ gains your choice of ([a-z ]+), ([a-z ]+), or ([a-z ]+) until end of turn$/)) && [m[1], m[2], m[3]].every(k => KW_LIST.includes(k))) return [{ k: 'l13ChoiceKw', kws: [m[1], m[2], m[3]] }];
+  if (/^look at target opponent's hand\. you may choose a nonland card from it\. if you do, that player exiles that card, then draws a card$/.test(s)) return [{ k: 'l13Salt' }];
+  if (/^you may exchange life totals with target opponent\. if you lost life this way, draw that many cards$/.test(s)) return [{ k: 'l13Swap' }];
+  if (/^put target creature card from your graveyard on top of your library$/.test(s)) return [{ k: 'l13GyTop' }];
+  if (/^return two target creature cards that share a creature type from your graveyard to your hand$/.test(s)) return [{ k: 'l13Unbury' }];
+  if ((m = s.match(/^choose a creature type\. other permanents you control of that type gain ([a-z ]+) until end of turn$/))) { const kws = l12KwList(m[1]); if (!kws.length || kws.join(' and ') !== m[1]) return null; return [{ k: 'l13TypeKw', kws }]; }
+  if (/^target opponent may have you create two lander tokens\. if they don't, put two \+1\/\+1 counters on ~$/.test(s)) return [{ k: 'l13Terra' }];
+  // the creature that entered / died, the damage dealt
+  if ((m = s.match(/^you gain (\d+) life\. if it's an? ([a-z]+), put a \+1\/\+1 counter on it$/))) return [{ k: 'gain', n: +m[1] }, { k: 'l13CtrIfIt', sub: m[2] }];
+  if (/^you may pay life equal to its power\. if you do, put that many \+1\/\+1 counters on it$/.test(s)) return [{ k: 'l13Null' }];
+  if (/^if it has greater power or toughness than ~, put a \+1\/\+1 counter on ~$/.test(s)) return [{ k: 'l13Hulk' }];
+  if (/^you gain life equal to its toughness$/.test(s)) return [{ k: 'l13GainTou' }];
+  if (/^put that many \+1\/\+1 counters on (?:her|him|it|~)$/.test(s)) return [{ k: 'l13SelfAmt' }];
+  if (/^return that card to its owner's hand$/.test(s)) return [{ k: 'l13ItToHand' }];
+  if (/^that creature explores$/.test(s)) return [{ k: 'l13Explore' }];
+  if (/^you may attach ~ to it$/.test(s)) return [{ k: 'l13AttachIt' }];
+  return null;
+}
+{ const _pe13 = parseEffects; parseEffects = function (s) {
+  const r = _pe13(s); if (typeof s !== 'string' || (r && r.length)) return r;
+  return l13Sentence(s.trim().replace(/\.$/, ''), _pe13) || r;
+}; }
+
+/* ---------- choices made by another player ---------- */
+CHGEN.l13OppExile = function* (s, op, ctx) {
+  const o = op.o; if (o == null || !alive(o)) return; const title = chTitle(ctx, 'Perfect Intimidation');
+  for (let i = 0; i < op.n && G.p[o].hand.length; i++) {
+    const hand = G.p[o].hand.map(id => G.cards[id]);
+    const k = yield { t: 'ask', o, labels: hand.map(cn), title: `${title}: exilia una carta de tu mano (${i + 1} de ${op.n})`, ai: () => hand.indexOf(bestBy(hand, c => -value(c))) };
+    const c = hand[+k] || hand[0]; moveCard(c, 'exile'); log(`${pn(o)} exilia ${cn(c)} de su mano.`);
+  }
+};
+CHWHO.l13OppExile = (s, op) => (op.o != null ? [op.o] : []);
+CHGEN.l13Terra = function* (s, op, ctx) {
+  const o = op.o; const src = G.cards[op.src]; if (o == null) return; const title = chTitle(ctx, 'Terrapact Intimidator');
+  const i = yield { t: 'ask', o, labels: [`Que ${pn(s)} cree dos fichas Lander`, `Que ${src ? cn(src) : 'la criatura'} reciba dos contadores +1/+1`], title: `${title}: elige`, ai: () => (permsOf(s).filter(isLand).length >= 7 ? 0 : 1) };
+  if (+i === 0) { for (let k = 0; k < 2; k++) applyOp({ k: 'lander', moreLands: false }, { seat: s, src }, null); log(`${pn(o)} deja que ${pn(s)} cree dos fichas Lander.`); }
+  else if (src && src.zone === 'bf') { addCounters(src, 2, 'p1', true); log(`${cn(src)} recibe dos contadores +1/+1.`); }
+};
+CHWHO.l13Terra = (s, op) => (op.o != null ? [op.o] : []);
+
+/* ---------- targets ---------- */
+EOE_TGT.l13RmAll = { valid: (op, ctx, x) => !!(x && x.card && x.card.zone === 'bf' && isCreature(x.card)), target: (op, ctx) => bestBy(permsAll().filter(c => isCreature(c) && matchFilter(c, 'creature', ctx.seat, false) && Object.values(c.cnt).some(v => v > 0)), c => c.ctl === ctx.seat ? (c.cnt.m1 || 0) * 2 - (c.cnt.p1 || 0) * 2 : Object.entries(c.cnt).reduce((n, [k, v]) => n + (k === 'm1' || k === 'stun' ? -v : v), 0)) || null };
+
+/* ---------- ops ---------- */
+function l13Bottom(s, list) { const l = list.slice(); shuffle(l); for (const c of l) moveCard(c, 'lib', { pos: 'bottom' }); }
+function l13RevealUntil(s, ok, need) { const got = [], rest = []; while (got.length < need && G.p[s].lib.length) { const c = G.cards[G.p[s].lib[0]]; moveCard(c, 'exile'); (ok(c) ? got : rest).push(c); } return { got, rest }; }
+function l13Dig(s, n) { return G.p[s].lib.slice(0, n).map(id => G.cards[id]); }
+function l13TutorFind(s, f) { return G.p[s].lib.map(id => G.cards[id]).filter(c => l13TypeOk(D(c), f)); }
+function l13BorrowDo(s, o, opp) { const hand = G.p[s].hand.map(id => G.cards[id]); for (const c of hand) moveCard(c, 'gy'); const n = opp ? (o != null ? G.p[o].hand.length : 0) : hand.length; log(`${pn(s)} descarta su mano (${hand.length}) y roba ${n}.`); if (n) drawCards(s, n); }
+function l13SacList(s, f) { return permsOf(s).filter(c => f === 'land' ? isLand(c) : !isLand(c)); }
+function l13SacDo(s, c) { if (!c) return; sacrifice(c); log(`${pn(s)} sacrifica ${cn(c)}.`); }
+function l13ExploreDo(s, c) { if (!c || c.zone !== 'bf') return; const id = G.p[s].lib[0]; if (id == null) return; const t = G.cards[id];
+  if (isLand(t)) { moveCard(t, 'hand'); log(`${cn(c)} explora: ${cn(t)} va a la mano.`); return; }
+  addCounters(c, 1, 'p1', true); const bot = isBotSeat(s); const toGy = bot ? (D(t).cmc || 0) > 5 : false; if (toGy) moveCard(t, 'gy');
+  log(`${cn(c)} explora: revela ${cn(t)}${toGy ? ' y la pone en el cementerio' : ''} y recibe un contador +1/+1.`); if (!bot) seatOps(s, [{ k: 'exploreGy', id: t.id }]); }
+function l13UnburyPairs(s) { const cre = G.p[s].gy.map(id => G.cards[id]).filter(c => /\bcreature\b/i.test(D(c).type_line || '')); let best = null; for (const a of cre) for (const b of cre) if (a.id < b.id && creTypes(D(a)).some(t => creTypes(D(b)).includes(t))) { const v = value(a) + value(b); if (!best || v > best[2]) best = [a, b, v]; } return { cre, best }; }
+function l13UnburyDo(s, list) { for (const c of list) if (c && c.zone === 'gy') moveCard(c, 'hand'); log(`${pn(s)} devuelve ${list.map(cn).join(' y ')} a su mano.`); }
+function l13TypeKwDo(s, src, type, kws) { const list = permsOf(s).filter(c => c !== src && fxIs(c, [type.toLowerCase()])); for (const c of list) c.tkw.push(...kws); log(`${pn(s)} elige ${type}: ${list.length ? list.map(cn).join(', ') + ' ganan ' + kws.map(k => KW_ES[k] || k).join(' y ') : 'ningún permanente'} hasta el final del turno.`); }
+function l13SaltDo(o, c) { if (!c || c.zone !== 'hand') return; moveCard(c, 'exile'); log(`${pn(o)} exilia ${cn(c)} de su mano y roba una carta.`); drawCards(o, 1); }
+function l13SwapDo(s, o) { const a = G.p[s].life, b = G.p[o].life; G.p[s].life = b; G.p[o].life = a; log(`${pn(s)} y ${pn(o)} intercambian sus totales de vidas (${a} ↔ ${b}).`, 'bad'); if (b < a) drawCards(s, a - b); }
+const l13Opps = s => oppsOf(s).filter(alive);
+Object.assign(XOPS, {
+  l13RmM1(op, ctx) { const c = l13Src(ctx); if (!c || c.zone !== 'bf' || !(c.cnt.m1 > 0)) return; c.cnt.m1--; recomputeMods(); log(`${cn(c)} pierde un contador -1/-1.`); },
+  l13Conq(op, ctx) { const s = ctx.seat; l11Mill(s, op.n); const land = bestBy(G.p[s].gy.map(id => G.cards[id]).filter(c => /\bland\b/i.test(D(c).type_line || '')), c => value(c) + Math.random()); if (land) { moveCard(land, 'hand'); log(`${cn(land)} vuelve a la mano de ${pn(s)}.`); } else applyOp({ k: 'treasure', n: 1 }, ctx, null); },
+  l13HitIt(op, ctx) { const s = ctx.seat; const top = l13Dig(s, op.n); const land = bestBy(top.filter(isLand), c => value(c)); if (land) moveCard(land, 'bf', { ctl: s, tapped: true }); for (const c of top) if (c !== land) moveCard(c, 'gy'); log(`${pn(s)} revela ${top.length} cartas${land ? ` y pone ${cn(land)} en el campo girada` : ''}; el resto va al cementerio.`); },
+  l13RevLands(op, ctx) { const s = ctx.seat; const r = l13RevealUntil(s, isLand, op.n); for (const c of r.got) moveCard(c, 'bf', { ctl: s, tapped: true }); l13Bottom(s, r.rest); log(`${pn(s)} revela hasta encontrar ${r.got.length} tierras y las pone en el campo giradas.`); },
+  l13RevCreAtk(op, ctx) { const s = ctx.seat; const src = l13Src(ctx); const r = l13RevealUntil(s, c => /\bcreature\b/i.test(D(c).type_line || ''), 1); const c = r.got[0]; l13Bottom(s, r.rest); if (!c) return; moveCard(c, 'bf', { ctl: s, tapped: true }); const to = src && src.atk != null ? src.atk : null; if (to != null && typeof to === 'number' && alive(to)) (G.fxAddAtk ||= []).push({ id: c.id, to }); log(`${pn(s)} pone ${cn(c)} en el campo girada${to != null ? ' y atacando' : ''}.`); },
+  l13DigBf(op, ctx) { const s = ctx.seat; const top = l13Dig(s, op.n); const c = bestBy(top.filter(x => l13TypeOk(D(x), op.f)), x => value(x)); if (c) { moveCard(c, 'bf', { ctl: s }); log(`${pn(s)} pone ${cn(c)} en el campo.`); } l13Bottom(s, top.filter(x => x !== c)); },
+  l13DigOrCtr(op, ctx) { const s = ctx.seat; const top = l13Dig(s, op.n); const c = bestBy(top.filter(x => l13TypeOk(D(x), op.f)), x => value(x)); if (c) { moveCard(c, 'hand'); log(`${pn(s)} revela ${cn(c)} y la pone en su mano.`); } l13Bottom(s, top.filter(x => x !== c)); if (!c) { const src = l13Src(ctx); if (src && src.zone === 'bf') { addCounters(src, 1, 'p1', true); log(`${cn(src)} recibe un contador +1/+1.`); } } },
+  l13TutorOr(op, ctx) { const s = ctx.seat; const c = bestBy(l13TutorFind(s, op.f), x => value(x)); if (c) { moveCard(c, 'hand'); log(`${pn(s)} busca ${cn(c)} y la pone en su mano.`); } shuffle(G.p[s].lib); if (!c) applyOp(op.tok, ctx, null); },
+  l13CtrEach(op, ctx) { const list = permsOf(ctx.seat).filter(c => fxIs(c, op.subs)); for (const c of list) addCounters(c, 1, 'p1', true); if (list.length) log(`${list.map(cn).join(', ')} reciben un contador +1/+1.`); },
+  l13Borrow(op, ctx) { const s = ctx.seat; const o = op.opp ? bestBy(l13Opps(s), q => G.p[q].hand.length) : null; if (op.opp && o == null) return; l13BorrowDo(s, o, op.opp); },
+  l13RmAll(op, ctx, t) { if (!t || t.zone !== 'bf') return; t.cnt = {}; recomputeMods(); log(`Se quitan todos los contadores de ${cn(t)}.`); },
+  l13OppExile(op, ctx) { const o = bestBy(l13Opps(ctx.seat), q => G.p[q].hand.length); if (o == null) return; chGo('l13OppExile', ctx.seat, { o, n: op.n }, ctx); },
+  l13RmDraw(op, ctx) { const s = ctx.seat; const c = bestBy(permsOf(s).filter(x => isCreature(x) && Object.values(x.cnt).some(v => v > 0)), x => (x.cnt.m1 || 0) * 3 + (x.cnt.stun || 0) * 3 - (x.cnt.p1 || 0)); if (!c) return; const kind = ['m1', 'stun'].find(k => c.cnt[k] > 0) || Object.keys(c.cnt).find(k => c.cnt[k] > 0); c.cnt[kind]--; recomputeMods(); log(`${pn(s)} quita un contador ${ctrName(kind)} de ${cn(c)} y roba una carta.`); drawCards(s, 1); },
+  l13DiscDraw(op, ctx) { const s = ctx.seat; const c = l11DiscardPick(s, G.p[s].hand.map(id => G.cards[id])); if (!c) return; moveCard(c, 'gy'); log(`${pn(s)} descarta ${cn(c)} y roba ${op.n}.`); drawCards(s, op.n); },
+  l13SacOne(op, ctx) { const s = ctx.seat; l13SacDo(s, bestBy(l13SacList(s, op.f), c => -value(c) - (c.token ? 2 : 0))); },
+  l13Beckett(op, ctx) { const c = l13Src(ctx); if (!c || c.zone !== 'bf') return; c.cnt.promotion = (c.cnt.promotion || 0) + 1; log(`${cn(c)} recibe un contador de ascenso (${c.cnt.promotion}).`); if (c.cnt.promotion >= 3) { c.cnt.promotion = 0; for (const o of l13Opps(ctx.seat)) damagePlayer(o, op.n, c); log(`${cn(c)} quita sus contadores de ascenso y hace ${op.n} de daño a cada oponente.`, 'bad'); } },
+  l13CtrIfNC(op, ctx) { const c = l13Src(ctx); if (!c || c.zone !== 'bf' || isCreature(c)) return; c.cnt.charge = (c.cnt.charge || 0) + op.n; log(`${cn(c)} recibe ${op.n} contador${op.n > 1 ? 'es' : ''} de carga.`); },
+  l13Tok(op, ctx) { const s = ctx.seat; if (tokenCap(s)) return; const tk = makeToken(s, op.spec); if (op.haste) tk.tkw.push('haste'); log(`${pn(s)} crea ${esc(op.spec.name)}${op.haste ? ', que gana prisa hasta el final del turno' : ''}.`); },
+  l13OppTok(op, ctx) { const o = bestBy(l13Opps(ctx.seat), q => -G.p[q].life + Math.random()); if (o == null || tokenCap(o)) return; makeToken(o, op.spec); log(`${pn(o)} crea ${esc(op.spec.name)}.`); },
+  l13ChoiceKw(op, ctx) { const c = l13Src(ctx); if (!c || c.zone !== 'bf') return; const k = op.kws.find(x => !hasKw(c, x)) || op.kws[0]; c.tkw.push(k); log(`${cn(c)} gana ${KW_ES[k] || k} hasta el final del turno.`); },
+  l13Salt(op, ctx) { const o = bestBy(l13Opps(ctx.seat), q => G.p[q].hand.length); if (o == null) return; const c = bestBy(G.p[o].hand.map(id => G.cards[id]).filter(x => !isLand(x)), x => value(x)); if (c) l13SaltDo(o, c); },
+  l13Swap(op, ctx) { const s = ctx.seat; const o = bestBy(l13Opps(s), q => G.p[q].life); if (o == null || G.p[o].life <= G.p[s].life) return; l13SwapDo(s, o); },
+  l13GyTop(op, ctx) { const s = ctx.seat; const c = bestBy(G.p[s].gy.map(id => G.cards[id]).filter(x => /\bcreature\b/i.test(D(x).type_line || '')), x => value(x)); if (!c) return; moveCard(c, 'lib', { pos: 'top' }); log(`${pn(s)} pone ${cn(c)} encima de su biblioteca.`); },
+  l13Unbury(op, ctx) { const s = ctx.seat; const { best } = l13UnburyPairs(s); if (best) l13UnburyDo(s, best.slice(0, 2)); },
+  l13TypeKw(op, ctx) { const s = ctx.seat; l13TypeKwDo(s, l13Src(ctx), commonType(s), op.kws); },
+  l13Terra(op, ctx) { const o = bestBy(l13Opps(ctx.seat), q => G.p[q].life); const src = l13Src(ctx); if (o == null) return; chGo('l13Terra', ctx.seat, { o, src: src ? src.id : null }, ctx); },
+  l13CtrIfIt(op, ctx) { const c = l13It(ctx); if (!c || c.zone !== 'bf' || !fxIs(c, [op.sub])) return; addCounters(c, 1, 'p1', true); log(`${cn(c)} recibe un contador +1/+1.`); },
+  l13Null(op, ctx) { const s = ctx.seat; const c = l13It(ctx); if (!c || c.zone !== 'bf') return; const n = Math.max(0, P(c)); if (!n || G.p[s].life - n < 15) return; loseLife(s, n); addCounters(c, n, 'p1', true); log(`${pn(s)} paga ${n} vidas: ${cn(c)} recibe ${n} contadores +1/+1.`); },
+  l13Hulk(op, ctx) { const c = l13It(ctx), x = l13Src(ctx); if (!c || !x || x.zone !== 'bf' || c.zone !== 'bf') return; if (P(c) > P(x) || T(c) > T(x)) { addCounters(x, 1, 'p1', true); log(`${cn(x)} recibe un contador +1/+1.`); } },
+  l13GainTou(op, ctx) { const c = l13It(ctx); if (!c) return; const n = Math.max(0, c.zone === 'bf' ? T(c) : (c._l13T != null ? c._l13T : basePT(D(c).toughness))); if (n) { gainLife(ctx.seat, n); log(`${pn(ctx.seat)} gana ${n} vidas.`); } },
+  l13SelfAmt(op, ctx) { const x = l13Src(ctx); const n = ctx.amount || 0; if (!x || x.zone !== 'bf' || !n) return; addCounters(x, n, 'p1', true); log(`${cn(x)} recibe ${n} contadores +1/+1.`); },
+  l13CtrN(op, ctx) { const x = l13Src(ctx); if (!x || x.zone !== 'bf' || !(op.n > 0)) return; addCounters(x, op.n, 'p1', true); log(`${cn(x)} recibe ${op.n} contadores +1/+1.`); },
+  l13ItToHand(op, ctx) { const c = op.id != null ? G.cards[op.id] : l13It(ctx); if (!c || c.zone !== 'gy') return; moveCard(c, 'hand'); log(`${cn(c)} vuelve a la mano de ${pn(c.owner)}.`); },
+  l13Explore(op, ctx) { const c = l13It(ctx); if (c) l13ExploreDo(c.ctl, c); },
+  l13AttachIt(op, ctx) { const x = l13Src(ctx), c = l13It(ctx); if (!x || !c || c.zone !== 'bf' || c.ctl !== x.ctl) return; attachTo(x, c); }
+});
+Object.assign(XPROMPT, {
+  async l13Borrow(op, pr) { const s = pr.ctx.seat; let o = null; if (op.opp) { const os = l13Opps(s); if (!os.length) return; const i = __R(ME, G, await askChoice(`${pr.title}: elige el oponente objetivo`, os.map(q => `${pn(q)} (${G.p[q].hand.length} cartas)`))); o = os[i != null && +i >= 0 ? +i : 0]; } l13BorrowDo(s, o, op.opp); },
+  async l13OppExile(op, pr) { const os = l13Opps(pr.ctx.seat); if (!os.length) return; const i = __R(ME, G, await askChoice(`${pr.title}: elige el oponente objetivo`, os.map(pn))); chGo('l13OppExile', pr.ctx.seat, { o: os[i != null && +i >= 0 ? +i : 0], n: op.n }, pr.ctx); },
+  async l13RmDraw(op, pr) { const s = pr.ctx.seat; const list = permsOf(s).filter(x => isCreature(x) && Object.values(x.cnt).some(v => v > 0)); if (!list.length) return; const c = __R(ME, G, await pickFromList(list, `${pr.title}: elige una criatura tuya con contadores (Cancelar = no)`)); if (!c) return; const kinds = Object.keys(c.cnt).filter(k => c.cnt[k] > 0); const i = kinds.length > 1 ? __R(ME, G, await askChoice(`${pr.title}: ¿qué contador quitas?`, kinds.map(k => `${ctrName(k)} (${c.cnt[k]})`))) : 0; const kind = kinds[i != null && +i >= 0 ? +i : 0]; c.cnt[kind]--; recomputeMods(); log(`${pn(s)} quita un contador ${ctrName(kind)} de ${cn(c)} y roba una carta.`); drawCards(s, 1); },
+  async l13DiscDraw(op, pr) { const s = pr.ctx.seat; if (!G.p[s].hand.length) return; let c = null; for (let k = 0; !c && k < 40; k++) c = __R(ME, G, await pickFromList(G.p[s].hand.map(id => G.cards[id]), `${pr.title}: descarta una carta`)); if (!c) return; moveCard(c, 'gy'); log(`${pn(s)} descarta ${cn(c)} y roba ${op.n}.`); drawCards(s, op.n); },
+  async l13SacOne(op, pr) { const s = pr.ctx.seat; const list = l13SacList(s, op.f); if (!list.length) return; let c = null; for (let k = 0; !c && k < 40; k++) c = __R(ME, G, await pickFromList(list, `${pr.title}: sacrifica ${op.f === 'land' ? 'una tierra' : 'un permanente que no sea tierra'}`)); l13SacDo(s, c || list[0]); },
+  async l13HitIt(op, pr) { const s = pr.ctx.seat; const top = l13Dig(s, op.n); const lands = top.filter(isLand); let land = null; for (let k = 0; lands.length && !land && k < 40; k++) land = __R(ME, G, await pickFromList(lands, `${pr.title}: elige la tierra que pones en el campo`)); if (land) moveCard(land, 'bf', { ctl: s, tapped: true }); for (const c of top) if (c !== land) moveCard(c, 'gy'); log(`${pn(s)} revela ${top.length} cartas${land ? ` y pone ${cn(land)} en el campo girada` : ''}; el resto va al cementerio.`); },
+  async l13DigBf(op, pr) { const s = pr.ctx.seat; const top = l13Dig(s, op.n); const ok = top.filter(x => l13TypeOk(D(x), op.f)); const c = ok.length ? __R(ME, G, await pickFromList(ok, `${pr.title}: puedes poner una carta en el campo (Cancelar = ninguna)`)) : null; if (c) { moveCard(c, 'bf', { ctl: s }); log(`${pn(s)} pone ${cn(c)} en el campo.`); } l13Bottom(s, top.filter(x => x !== c)); },
+  async l13DigOrCtr(op, pr) { const s = pr.ctx.seat; const top = l13Dig(s, op.n); const ok = top.filter(x => l13TypeOk(D(x), op.f)); const c = ok.length ? __R(ME, G, await pickFromList(ok, `${pr.title}: puedes poner una carta en tu mano (Cancelar = contador +1/+1)`)) : null; if (c) { moveCard(c, 'hand'); log(`${pn(s)} revela ${cn(c)} y la pone en su mano.`); } l13Bottom(s, top.filter(x => x !== c)); if (!c) { const src = l13Src(pr.ctx); if (src && src.zone === 'bf') { addCounters(src, 1, 'p1', true); log(`${cn(src)} recibe un contador +1/+1.`); } } },
+  async l13TutorOr(op, pr) { const s = pr.ctx.seat; const list = l13TutorFind(s, op.f); const c = list.length ? __R(ME, G, await pickFromList(list, `${pr.title}: puedes buscar una carta (Cancelar = no buscar y crear la ficha)`)) : null; if (c) { moveCard(c, 'hand'); log(`${pn(s)} busca ${cn(c)} y la pone en su mano.`); } shuffle(G.p[s].lib); if (!c) applyOp(op.tok, pr.ctx, null); },
+  async l13OppTok(op, pr) { const os = l13Opps(pr.ctx.seat); if (!os.length) return; const i = __R(ME, G, await askChoice(`${pr.title}: elige el oponente objetivo que crea ${op.spec.name}`, os.map(pn))); const o = os[i != null && +i >= 0 ? +i : 0]; if (tokenCap(o)) return; makeToken(o, op.spec); log(`${pn(o)} crea ${esc(op.spec.name)}.`); },
+  async l13ChoiceKw(op, pr) { const c = l13Src(pr.ctx); if (!c || c.zone !== 'bf') return; const i = __R(ME, G, await askChoice(`${pr.title}: elige la habilidad`, op.kws.map(k => KW_ES[k] || k))); const k = op.kws[i != null && +i >= 0 ? +i : 0]; c.tkw.push(k); log(`${cn(c)} gana ${KW_ES[k] || k} hasta el final del turno.`); },
+  async l13Salt(op, pr) { const os = l13Opps(pr.ctx.seat); if (!os.length) return; const i = __R(ME, G, await askChoice(`${pr.title}: elige el oponente objetivo`, os.map(pn))); const o = os[i != null && +i >= 0 ? +i : 0]; const hand = G.p[o].hand.map(id => G.cards[id]); log(`${pn(pr.ctx.seat)} mira la mano de ${pn(o)}: ${hand.map(cn).join(', ') || 'vacía'}.`); const ok = hand.filter(x => !isLand(x)); const c = ok.length ? __R(ME, G, await pickFromList(ok, `${pr.title}: puedes elegir una carta que no sea tierra (Cancelar = ninguna)`)) : null; if (c) l13SaltDo(o, c); },
+  async l13Swap(op, pr) { const s = pr.ctx.seat; const os = l13Opps(s); if (!os.length) return; const i = __R(ME, G, await askChoice(`${pr.title}: puedes intercambiar tu total de vidas (${G.p[s].life}) con un oponente`, [...os.map(q => `${pn(q)} (${G.p[q].life} vidas)`), 'No intercambiar'])); if (i == null || +i < 0 || +i >= os.length) return; l13SwapDo(s, os[+i]); },
+  async l13GyTop(op, pr) { const s = pr.ctx.seat; const list = G.p[s].gy.map(id => G.cards[id]).filter(x => /\bcreature\b/i.test(D(x).type_line || '')); if (!list.length) return; let c = null; for (let k = 0; !c && k < 40; k++) c = __R(ME, G, await pickFromList(list, `${pr.title}: elige la criatura que pones encima de tu biblioteca`)); c = c || list[0]; moveCard(c, 'lib', { pos: 'top' }); log(`${pn(s)} pone ${cn(c)} encima de su biblioteca.`); },
+  async l13Unbury(op, pr) { const s = pr.ctx.seat; const { cre } = l13UnburyPairs(s); if (cre.length < 2) return; const a = __R(ME, G, await pickFromList(cre, `${pr.title}: elige la primera criatura`)); if (!a) return; const ok = cre.filter(b => b !== a && creTypes(D(a)).some(t => creTypes(D(b)).includes(t))); if (!ok.length) { toast('Ninguna otra comparte un tipo de criatura con esa.'); return; } const b = __R(ME, G, await pickFromList(ok, `${pr.title}: elige la segunda (comparte un tipo con ${cn(a)})`)); if (b) l13UnburyDo(s, [a, b]); },
+  async l13TypeKw(op, pr) { const s = pr.ctx.seat; const opts = typeChoices(s); const i = __R(ME, G, await askChoice(`${pr.title}: elige un tipo de criatura`, opts)); l13TypeKwDo(s, l13Src(pr.ctx), opts[i != null && +i >= 0 ? +i : 0] || commonType(s), op.kws); },
+  async l13Terra(op, pr) { const os = l13Opps(pr.ctx.seat); if (!os.length) return; const i = __R(ME, G, await askChoice(`${pr.title}: elige el oponente objetivo`, os.map(pn))); const src = l13Src(pr.ctx); chGo('l13Terra', pr.ctx.seat, { o: os[i != null && +i >= 0 ? +i : 0], src: src ? src.id : null }, pr.ctx); },
+  async l13Null(op, pr) { const s = pr.ctx.seat; const c = l13It(pr.ctx); if (!c || c.zone !== 'bf') return; const n = Math.max(0, P(c)); if (!n || !__R(ME, G, await askYesNo(pr.title, `¿Pagar ${n} vidas para poner ${n} contadores +1/+1 en ${cn(c)}?`))) return; loseLife(s, n); addCounters(c, n, 'p1', true); log(`${pn(s)} paga ${n} vidas: ${cn(c)} recibe ${n} contadores +1/+1.`); },
+  async l13AttachIt(op, pr) { const x = l13Src(pr.ctx), c = l13It(pr.ctx); if (!x || !c || c.zone !== 'bf' || c.ctl !== x.ctl) return; if (__R(ME, G, await askYesNo(pr.title, `¿Anexar ${cn(x)} a ${cn(c)}?`))) attachTo(x, c); }
+});
+Object.assign(XTEXT, {
+  l13RmM1: () => 'Quitar un contador -1/-1 de esta criatura', l13Conq: o => `Moler ${o.n}; devolver una tierra del cementerio a la mano (si no puedes, Tesoro)`, l13HitIt: o => `Revelar ${o.n}: una tierra al campo girada, el resto al cementerio`,
+  l13RevLands: () => 'Revelar hasta dos tierras y ponerlas en el campo giradas', l13RevCreAtk: () => 'Revelar hasta una criatura y ponerla girada y atacando', l13DigBf: o => `Mirar ${o.n}: puedes poner una carta de ${o.f} en el campo`,
+  l13DigOrCtr: o => `Mirar ${o.n}: puedes coger una carta de ${o.f}; si no, contador +1/+1`, l13TutorOr: o => `Puedes buscar una carta de ${o.f}; si no, crear la ficha`, l13CtrEach: o => `Un contador +1/+1 en cada ${o.subs.join(', ')} tuyo`,
+  l13Borrow: o => `Descartar tu mano y robar tantas como ${o.opp ? 'tenga el oponente' : 'descartaste'}`, l13RmAll: () => 'Quitar todos los contadores de una criatura', l13OppExile: o => `Un oponente exilia ${o.n} cartas de su mano`,
+  l13RmDraw: () => 'Quitar un contador de una criatura tuya para robar', l13DiscDraw: o => `Descartar una carta para robar ${o.n}`, l13SacOne: o => `Sacrificar ${o.f === 'land' ? 'una tierra' : 'un permanente que no sea tierra'}`,
+  l13Beckett: o => `Contador de ascenso; con 3, ${o.n} de daño a cada oponente`, l13CtrIfNC: o => `Si no es criatura, ${o.n} contador(es) de carga`, l13Tok: o => `Crear ${o.spec.name}`, l13OppTok: o => `Un oponente crea ${o.spec.name}`,
+  l13ChoiceKw: o => `Gana a elegir ${o.kws.map(k => KW_ES[k] || k).join(', ')}`, l13Salt: () => 'Mirar la mano de un oponente; puede exiliar una carta y robar', l13Swap: () => 'Puedes intercambiar totales de vidas con un oponente',
+  l13GyTop: () => 'Poner una criatura de tu cementerio encima de tu biblioteca', l13Unbury: () => 'Devolver dos criaturas que compartan tipo a tu mano', l13TypeKw: o => `Elegir un tipo: tus otros permanentes de ese tipo ganan ${o.kws.map(k => KW_ES[k] || k).join(' y ')}`,
+  l13Terra: () => 'Un oponente elige: tú creas dos Lander o esta recibe dos contadores +1/+1', l13CtrIfIt: o => `Si es ${o.sub}, contador +1/+1`, l13Null: () => 'Puedes pagar vidas igual a su fuerza para darle contadores',
+  l13Hulk: () => 'Si es más grande, contador +1/+1 aquí', l13GainTou: () => 'Ganar vidas igual a su resistencia', l13SelfAmt: () => 'Tantos contadores +1/+1 como daño', l13ItToHand: () => 'Devolver esa carta a la mano', l13CtrN: o => `${o.n} contadores +1/+1`,
+  l13Explore: () => 'Esa criatura explora', l13AttachIt: () => 'Puedes anexar este Equipo a esa criatura'
+});
 </script>
 
 <script src="/config.js"></script>
