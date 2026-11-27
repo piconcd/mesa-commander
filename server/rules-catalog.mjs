@@ -44,6 +44,29 @@ export async function* cardObjects(body) {
   yield* consume(decoder.decode());
   if (!ended || depth) throw Error('Truncated catalog');
 }
+// Scryfall now publishes the Oracle bulk file as JSON Lines (one card per line), gzip-compressed.
+export async function* cardLines(body) {
+  const decoder = new TextDecoder('utf-8',{fatal:true});
+  let rest='', bytes=0;
+  function* lines(text, last) {
+    rest+=text;
+    const parts=rest.split('\n'); rest=last?'':parts.pop();
+    for (const l of parts) { const t=l.trim(); if (!t) continue; if (t.length>512*1024) throw Error('Oversized catalog entry'); const card=JSON.parse(t); if (!card||typeof card!=='object'||Array.isArray(card)) throw Error('Invalid catalog line'); yield card; }
+    if (rest.length>512*1024) throw Error('Oversized catalog entry');
+  }
+  for await (const chunk of body) {
+    bytes+=chunk.byteLength;
+    if (bytes>400*1024*1024) throw Error('Catalog too large');
+    yield* lines(decoder.decode(chunk,{stream:true}),false);
+  }
+  yield* lines(decoder.decode(),true);
+}
+export function oracleSource(meta) {
+  const raw=typeof meta?.jsonl_download_uri==='string'?meta.jsonl_download_uri:typeof meta?.download_uri==='string'?meta.download_uri:null;
+  let u; try { u=new URL(raw); } catch { throw Error('Oracle download URL missing'); }
+  if(u.protocol!=='https:'||u.hostname!=='data.scryfall.io'||u.username||u.password) throw Error('Invalid Oracle download URL');
+  return {url:u.href,lines:raw===meta.jsonl_download_uri,gzip:/\.gz$/i.test(u.pathname)};
+}
 function face(c) {
   const out={};
   for (const k of ['name','flavor_name','mana_cost','type_line','oracle_text','power','toughness','loyalty','defense','colors','image_uris']) if(c[k]!=null) out[k]=c[k];
@@ -107,10 +130,11 @@ export function startRulesCatalog({directory='/data/rules',log=console}={}) {
     const meta=await (await get(BULK)).json();
     if(meta.type!=='oracle_cards'||typeof meta.updated_at!=='string') throw Error('Invalid Oracle metadata');
     if(snapshot?.version===meta.updated_at) return;
-    const u=new URL(meta.download_uri);
-    if(u.protocol!=='https:'||u.hostname!=='data.scryfall.io'||u.username||u.password) throw Error('Invalid Oracle download URL');
-    const response=await get(u.href,240000), cards=[];
-    for await(const card of cardObjects(response.body)) {
+    const src=oracleSource(meta);
+    const response=await get(src.url,240000), cards=[];
+    const gz=src.gzip||/gzip/i.test(response.headers.get('content-type')||'');
+    const body=gz?response.body.pipeThrough(new DecompressionStream('gzip')):response.body;
+    for await(const card of (src.lines?cardLines:cardObjects)(body)) {
       const c=compactCard(card); if(c) cards.push(c);
       if(cards.length>100000) throw Error('Too many entries');
     }

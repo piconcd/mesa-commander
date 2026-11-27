@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { cardObjects, compactCard, indexCards, rulesTextURL, madridClock } from '../server/rules-catalog.mjs';
+import { gzipSync } from 'node:zlib';
+import { cardObjects, cardLines, oracleSource, compactCard, indexCards, rulesTextURL, madridClock } from '../server/rules-catalog.mjs';
 async function* chunks(s) {
   const data=new TextEncoder().encode(s);
   for(let i=0;i<data.length;i+=3) yield data.slice(i,i+3);
@@ -13,6 +14,24 @@ test('streaming catalog handles nested data, UTF-8, escapes and split chunks',as
   await assert.rejects(collect('[{"name":"a"}'),/Truncated/);
   await assert.rejects(collect('[{},]'),/separator/);
   await assert.rejects(collect('[]{}'),/suffix/);
+});
+async function collectLines(src){const a=[];for await(const x of cardLines(src))a.push(x);return a;}
+test('Scryfall JSON Lines bulk file: split chunks, UTF-8, blank lines and gzip',async()=>{
+  const input=[{name:'Ángel "test"',oracle_text:'a\nb'},{name:'Two',nested:[{x:'} ['}]}];
+  const text=input.map(c=>JSON.stringify(c)).join('\n')+'\n\n';
+  assert.deepEqual(await collectLines(chunks(text)),input);
+  assert.deepEqual(await collectLines(chunks(text.trim())),input,'last line without a newline');
+  const gz=new Blob([gzipSync(text)]).stream().pipeThrough(new DecompressionStream('gzip'));
+  assert.deepEqual(await collectLines(gz),input);
+  await assert.rejects(collectLines(chunks('{"name":"a"}\n[1]\n')),/Invalid catalog line/);
+  await assert.rejects(collectLines(chunks('{"name":"a"')),SyntaxError);
+});
+test('Oracle download link: new jsonl_download_uri, old download_uri, only data.scryfall.io',()=>{
+  assert.deepEqual(oracleSource({jsonl_download_uri:'https://data.scryfall.io/oracle-cards/oracle-cards-20261126220200.jsonl.gz'}),
+    {url:'https://data.scryfall.io/oracle-cards/oracle-cards-20261126220200.jsonl.gz',lines:true,gzip:true});
+  assert.deepEqual(oracleSource({download_uri:'https://data.scryfall.io/oracle-cards/oracle-cards-1.json'}),{url:'https://data.scryfall.io/oracle-cards/oracle-cards-1.json',lines:false,gzip:false});
+  assert.throws(()=>oracleSource({}),/missing/);
+  assert.throws(()=>oracleSource({jsonl_download_uri:'https://evil.invalid/oracle.jsonl.gz'}),/Invalid Oracle download URL/);
 });
 test('compact catalog retains faces and legality; ambiguous aliases are rejected',()=>{
   const a=compactCard({object:'card',name:'Fire // Ice',type_line:'Instant // Instant',card_faces:[{name:'Fire',oracle_text:'A'},{name:'Ice',oracle_text:'B'}],legalities:{commander:'legal'}});
