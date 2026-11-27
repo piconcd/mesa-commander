@@ -15992,6 +15992,321 @@ Object.assign(XTEXT, {
   l11ExileGy: () => 'Exiliar una carta de un cementerio; si es criatura, Pista', l11Pursuit: () => 'X contadores +1/+1 (permanentes sacrificados este turno); con 3+, vínculo vital'
 });
 
+/* =====================================================================
+   Tanda 12 (group 1 of the «easy» cards of the ten sets): sentences the engine almost knew.
+   · Targets with a filter (op l12T): «up to one other target …», «another target Merfolk you control», «target
+     attacking Goblin you control», «target Klingon», «… with mana value N or greater», «… with toughness N or
+     greater», «target modified creature you control». The old parser dropped these sentences.
+   · Auras: «When this Aura enters, enchanted creature gains … until end of turn» / «tap enchanted creature».
+   · Tokens: Planet «New Planet» (tapped land, «{T}: Add one mana of any color»), named legendary tokens (Murf, Mowu),
+     «each player creates a Food token».
+   · «Whenever a creature you control attacks alone, …» (Agent 13, Agents of S.H.I.E.L.D., Black Widow, Luke Cage, Yuriko).
+   · Counts: «the number of colors among permanents you control», «the greatest power among creatures you control»,
+     «the number of instant and sorcery cards in your graveyard»; «draw cards / gain life equal to …».
+   · Spells with a condition on the target (Tainted Treats, Seedship Impact, Shredder's Technique, Prophesied End,
+     Depressurize, Thwip!, Dual-Sun Technique, Zealous Display, Orbital Plunge, Heated Argument, Wisecrack…).
+   ===================================================================== */
+const L12_NOTSUB = new Set(['spell', 'spells', 'card', 'cards', 'player', 'players', 'opponent', 'opponents', 'ability', 'abilities', 'target', 'and', 'or', 'a', 'an', 'the', 'each', 'of', 'with', 'from', 'your', 'graveyard', 'it', 'that', 'this', 'any', 'one', 'up', 'to', 'all']);
+const L12_TYPES = ['creature', 'artifact', 'enchantment', 'land', 'planeswalker', 'permanent', 'nonland', 'noncreature', 'nonartifact', 'nontoken', 'legendary', 'equipment', 'vehicle', 'aura'];
+// «another nonland permanent you control with mana value 3 or greater» → { other, you, atk, mod, mv, tou, alts: [['nonland','permanent']] }
+function l12Req(f0) {
+  let f = String(f0 || '').trim(); let m;
+  const r = { other: false, you: null, atk: false, mod: false, mv: null, tou: null, alts: [] };
+  if ((m = f.match(/^(?:another|other) (.+)$/))) { r.other = true; f = m[1]; }
+  for (let i = 0; i < 2; i++) {
+    if ((m = f.match(/^(.+?) with (mana value|toughness) (\d+) or (greater|less)$/))) { r[m[2] === 'toughness' ? 'tou' : 'mv'] = { n: +m[3], min: m[4] === 'greater' }; f = m[1]; }
+    if ((m = f.match(/^(.+?) (you control|an opponent controls|you don't control)$/))) { r.you = m[2] === 'you control'; f = m[1]; }
+  }
+  for (;;) { if ((m = f.match(/^attacking (.+)$/))) { r.atk = true; f = m[1]; } else if ((m = f.match(/^modified (.+)$/))) { r.mod = true; f = m[1]; } else break; }
+  for (const alt of f.split(/,? or |, /)) {
+    const w = alt.trim().split(/\s+/).filter(Boolean);
+    if (!w.length || w.some(x => !/^[a-z]+$/.test(x) || L12_NOTSUB.has(x))) return null;
+    r.alts.push(w);
+  }
+  // «nontoken artifact or creature»: the adjective applies to every alternative
+  const adj = r.alts.length > 1 ? r.alts[0].filter((x, i) => i < r.alts[0].length - 1 && ['nontoken', 'legendary'].includes(x)) : [];
+  if (adj.length) r.alts = r.alts.map((w, i) => i === 0 ? w : [...adj, ...w]);
+  return r.alts.length ? r : null;
+}
+// modified = it has a counter, is equipped or is enchanted by an Aura its controller controls (CR 700.9)
+const l12Mod = c => !!c && (Object.values(c.cnt || {}).some(v => v > 0) || permsAll().some(x => x.att === c.id && x.ctl === c.ctl && (isType(x, 'equipment') || isType(x, 'aura'))));
+function l12Is(c, w) {
+  if (w === 'permanent') return true;
+  if (w === 'nonland') return !isLand(c);
+  if (w === 'noncreature') return !isCreature(c);
+  if (w === 'nonartifact') return !isType(c, 'artifact');
+  if (w === 'nontoken') return !c.token;
+  if (w === 'legendary') return /\blegendary\b/i.test(D(c).type_line || '');
+  if (w === 'creature') return isCreature(c);
+  if (L12_TYPES.includes(w)) return isType(c, w);
+  return fxIs(c, [FX_SING(w)]);
+}
+function l12Match(c, r, s, src, ignoreHex) {
+  if (!c || c.zone !== 'bf' || !r) return false;
+  if (r.other && src && c.id === src.id) return false;
+  if (r.you === true && c.ctl !== s) return false;
+  if (r.you === false && c.ctl === s) return false;
+  if (!ignoreHex && ((c.ctl !== s && hasKw(c, 'hexproof')) || hasKw(c, 'shroud'))) return false;
+  if (r.atk && c.atk == null) return false;
+  if (r.mod && !l12Mod(c)) return false;
+  if (r.mv) { const v = D(c).cmc || 0; if (r.mv.min ? v < r.mv.n : v > r.mv.n) return false; }
+  if (r.tou) { const v = T(c); if (r.tou.min ? v < r.tou.n : v > r.tou.n) return false; }
+  return r.alts.some(w => w.every(x => l12Is(c, x)));
+}
+// the same for cards that are not on the battlefield (graveyard)
+function l12IsDef(d, w) {
+  const tl = (d && d.type_line || '').toLowerCase();
+  if (w === 'permanent') return /\b(creature|artifact|enchantment|land|planeswalker|battle)\b/.test(tl);
+  if (w === 'nonland') return !/\bland\b/.test(tl);
+  if (w === 'noncreature') return !/\bcreature\b/.test(tl);
+  if (w === 'nonartifact') return !/\bartifact\b/.test(tl);
+  return new RegExp('\\b' + FX_SING(w) + '\\b').test(tl);
+}
+const l12DefMatch = (d, r) => !!r && r.alts.some(w => w.every(x => l12IsDef(d, x)));
+const L12_ES = [[/\bnonland permanent\b/g, 'permanente que no sea tierra'], [/\bnontoken\b/g, 'que no sea ficha'], [/\bcreature\b/g, 'criatura'], [/\bartifact\b/g, 'artefacto'], [/\benchantment\b/g, 'encantamiento'], [/\bplaneswalker\b/g, 'planeswalker'], [/\bpermanent\b/g, 'permanente'], [/\bland\b/g, 'tierra'], [/\byou control\b/g, 'tuyo'], [/\ban opponent controls\b/g, 'de un oponente'], [/\banother\b|\bother\b/g, 'otro'], [/\battacking\b/g, 'atacante'], [/\bmodified\b/g, 'modificada'], [/\bwith mana value (\d+) or greater\b/g, 'de valor de maná $1 o más'], [/\bwith mana value (\d+) or less\b/g, 'de valor de maná $1 o menos'], [/\bwith toughness (\d+) or greater\b/g, 'de resistencia $1 o más'], [/\bor\b/g, 'o']];
+const l12Es = f => L12_ES.reduce((t, [a, b]) => t.replace(a, b), String(f));
+const L12_COL = { white: 'W', blue: 'U', black: 'B', red: 'R', green: 'G' };
+// «flying, first strike, and haste»: the serial comma before «and» left the last keyword out
+const l12KwList = t => kwList(String(t || '').replace(/,? and /g, ', '));
+
+/* ---------- counts ---------- */
+{ const _ct12 = l9CountSpec; l9CountSpec = function (txt) {
+  if (/^the number of colors among permanents you control$/.test(txt)) return ['l12colors'];
+  if (/^the greatest power among creatures you control$/.test(txt)) return ['l12gpow'];
+  if (/^the number of instant and sorcery cards in your graveyard$/.test(txt)) return ['l12gyIS'];
+  return _ct12(txt);
+}; }
+{ const _cn12 = l9Count; l9Count = function (spec, s) {
+  if (spec && spec[0] === 'l12colors') { const set = new Set(); for (const c of permsOf(s)) for (const x of D(c).colors || []) set.add(x); return set.size; }
+  if (spec && spec[0] === 'l12gpow') return Math.max(0, ...permsOf(s).filter(isCreature).map(P));
+  if (spec && spec[0] === 'l12gyIS') return G.p[s].gy.filter(id => /\b(instant|sorcery)\b/i.test(D(G.cards[id]).type_line || '')).length;
+  return _cn12(spec, s);
+}; }
+
+/* ---------- conditions ---------- */
+{ const _co12 = cdOk; cdOk = function (sp, ctx) {
+  if (sp && sp.k === 'l12tgt') {
+    // a token that left the battlefield no longer exists (CR 111.7): use what was noted before the effect
+    const c = l11Last(ctx); const pre = ctx && ctx.l12Pre && ctx.l12Pre.id === ctx.lastTgt ? ctx.l12Pre : null; if (!c && !pre) return false;
+    if (sp.ench && !(pre && pre.ench)) return false;
+    if (sp.gone && c && c.zone === 'bf') return false;
+    if (sp.notAtk && (!pre || pre.atk)) return false;
+    if (sp.mvMax != null && (pre ? pre.mv : (D(c).cmc || 0)) > sp.mvMax) return false;
+    if (sp.sub && !(c && fxIs(c, [sp.sub]))) return false;
+    if (sp.p1 && !(c && c.zone === 'bf' && (c.cnt.p1 || 0) > 0)) return false;
+    return true;
+  }
+  return _co12(sp, ctx);
+}; }
+{ const _fc12 = fxCond; fxCond = function (cond, s, c) { if (cond === 'l12mod') return l12Mod(c); return _fc12(cond, s, c); }; }
+// what the marked target was before the effect (attacking? an enchantment? its mana value, its controller)
+const l12Note = t => ({ id: t.id, atk: t.atk != null, ench: isType(t, 'enchantment'), ctl: t.ctl, mv: D(t).cmc || 0 });
+{ const _ao12 = applyOp; applyOp = function (op, ctx, t) {
+  if (op && op.l7mark && ctx && t && t.zone === 'bf') ctx.l12Pre = l12Note(t);
+  return _ao12.apply(this, arguments);
+}; }
+
+/* ---------- «attacks alone» ---------- */
+{ const _fa12 = fxAttackers; fxAttackers = function (s, attacks) {
+  const r = _fa12.apply(this, arguments);
+  try {
+    const list = (attacks || []).filter(a => a && G.cards[a.id] && G.cards[a.id].zone === 'bf');
+    if (G && list.length === 1) {
+      const c = G.cards[list[0].id];
+      for (const x of permsOf(s)) for (const al of AB(x).l12Alone || []) {
+        if (al.self && x.id !== c.id) continue;
+        if (al.player && typeof list[0].to !== 'number') continue;
+        if (al.ops) trigger(x, al.ops); else trigger(x, [{ k: 'l12AloneDo', id: c.id, p: al.p, t: al.t, kws: al.kws }]);
+      }
+    }
+  } catch (e) { console.error(e); }
+  return r;
+}; }
+
+/* ---------- lines ---------- */
+function l12Line(a, l) {
+  let m; const t = l.replace(/\.$/, '');
+  if ((m = t.match(/^whenever (a creature you control|~) attacks (a player )?alone, (.+)$/))) {
+    const e = m[3]; let al = null; let n;
+    if ((n = e.match(/^(?:it|that creature|he|she|they|~) gets? \+(\d+)\/\+(\d+)(?: and gains? ([a-z ,]+?))? until end of turn$/))) { const kws = n[3] ? l12KwList(n[3]) : []; if (n[3] && kws.join(' and ') !== n[3].replace(/,? and |, /g, ' and ')) return false; al = { p: +n[1], t: +n[2], kws }; }
+    else if ((n = e.match(/^(?:it|that creature|he|she|they|~) gains? ([a-z ,]+?) until end of turn$/))) { const kws = l12KwList(n[1]); if (!kws.length || kws.join(' and ') !== n[1].replace(/,? and |, /g, ' and ')) return false; al = { p: 0, t: 0, kws }; }
+    else { if (/\b(it|that creature|he|she|they|target)\b/.test(e)) return false; const ops = parseEffects(e); if (!ops.length || !l7Safe(e, ops)) return false; al = { ops }; }
+    al.self = m[1] === '~'; al.player = !!m[2];
+    (a.l12Alone ||= []).push(al); return true;
+  }
+  if ((m = t.match(/^~ has ([a-z ,]+) as long as it's modified$/))) { const k = l12KwList(m[1]); if (!k.length || k.join(' and ') !== m[1].replace(/,? and |, /g, ' and ')) return false; (a.selfCond ||= []).push({ cond: 'l12mod', p: 0, t: 0, kw: k }); return true; }
+  return false;
+}
+// an activated ability that makes a Planet: its quoted «{T}: Add …» made parseAct take it for a mana ability
+const L12_PLANET = /create a tapped planet land token named new planet with "\{t\}: add one mana of any color\.?"/;
+const L12_PLANET_ALL = new RegExp('^' + L12_PLANET.source + '$');
+{ const _pa12 = parseAct; parseAct = function (l, raw) { if (typeof l === 'string' && L12_PLANET.test(l)) return _pa12.call(this, l.replace(L12_PLANET, 'create a tapped new planet token'), raw || l); return _pa12.apply(this, arguments); }; }
+{ const _el12 = eoeLine; eoeLine = function (a, l, PE) { if (l12Line(a, l)) return true; return _el12(a, l, PE); }; }
+
+/* ---------- whole sentences ---------- */
+function l12Tgt(base, f, harm, text, extra) { const req = l12Req(f); if (!req) return null; return [Object.assign({ k: 'l12T', base, req, harm, text }, extra || {})]; }
+function l12Sentence(s, pe) {
+  let m;
+  // filtered targets
+  if ((m = s.match(/^return (up to one )?((?:an)?other )?target (.+?) to its owner's hand$/))) { const r = l12Tgt({ k: 'bounce', f: 'permanent' }, (m[2] ? 'other ' : '') + m[3], true, `Devolver a la mano ${m[1] ? 'hasta un ' : ''}${l12Es((m[2] ? 'other ' : '') + m[3])}`, { upTo: !!m[1] }); if (r) return r; }
+  if ((m = s.match(/^(destroy|exile) (up to one )?((?:an)?other )?target (.+)$/)) && !/\b(card|spell|from)\b/.test(m[4])) { const r = l12Tgt({ k: m[1], f: 'permanent' }, (m[3] ? 'other ' : '') + m[4], true, `${m[1] === 'destroy' ? 'Destruir' : 'Exiliar'} ${l12Es((m[3] ? 'other ' : '') + m[4])}`, { upTo: !!m[2] }); if (r) return r; }
+  if ((m = s.match(/^((?:an)?other )?target (.+?) gets \+(\d+)\/\+(\d+)(?: and gains ([a-z ,]+?))? until end of turn$/))) {
+    const kws = m[5] ? l12KwList(m[5]) : [];
+    const r = m[5] && kws.join(' and ') !== m[5].replace(/,? and |, /g, ' and ') ? null : l12Tgt({ k: 'pumpT', p: +m[3], t: +m[4], kws, f: 'creature' }, (m[1] ? 'other ' : '') + m[2], false, `+${m[3]}/+${m[4]}${kws.length ? ' y ' + kws.map(k => KW_ES[k] || k).join(' y ') : ''} a ${l12Es((m[1] ? 'other ' : '') + m[2])}`);
+    if (r) return r;
+  }
+  if ((m = s.match(/^((?:an)?other )?target (.+?) gains ([a-z ,]+?) until end of turn$/))) {
+    const kws = l12KwList(m[3]);
+    const r = !kws.length || kws.join(' and ') !== m[3].replace(/,? and |, /g, ' and ') ? null : l12Tgt({ k: 'pumpT', p: 0, t: 0, kws, f: 'creature' }, (m[1] ? 'other ' : '') + m[2], false, `${l12Es((m[1] ? 'other ' : '') + m[2])} gana ${kws.map(k => KW_ES[k] || k).join(' y ')}`);
+    if (r) return r;
+  }
+  if ((m = s.match(/^untap ((?:an)?other )?target (.+)$/))) { const r = l12Tgt({ k: 'l12Untap' }, (m[1] ? 'other ' : '') + m[2], false, `Enderezar ${l12Es((m[1] ? 'other ' : '') + m[2])}`); if (r) return r; }
+  if ((m = s.match(/^~ deals (\d+) damage to target (attacking|blocking|attacking or blocking) creature$/))) return l12Tgt({ k: 'dmg', n: +m[1], f: 'creature' }, 'creature', true, `${m[1]} de daño a una criatura ${m[2] === 'attacking' ? 'atacante' : m[2] === 'blocking' ? 'bloqueadora' : 'atacante o bloqueadora'}`, { need: m[2] });
+  if ((m = s.match(/^exile (up to one )?((?:an)?other )?target (.+?), then return (?:that card|it) to the battlefield (tapped )?under its owner's control$/))) { const own = /you control/.test(m[3]); const r = l12Tgt({ k: 'l12Blink', tapped: !!m[4] }, (m[2] ? 'other ' : '') + m[3], !own, `Exiliar y devolver${m[4] ? ' girado' : ''} ${l12Es((m[2] ? 'other ' : '') + m[3])}`, { blink: own, upTo: !!m[1] }); if (r) return r; }
+  if (/^double target creature's power and toughness until end of turn$/.test(s)) return [{ k: 'l12Double' }];
+  if ((m = s.match(/^return target (.+?) card with mana value (\d+) or less from your graveyard to the battlefield$/))) { const req = l12Req(m[1]); if (!req) return null; return [{ k: 'l12Rean', req, max: +m[2], text: `Devolver del cementerio al campo: ${l12Es(m[1])} de valor de maná ${m[2]} o menos` }]; }
+  // groups
+  if ((m = s.match(/^each other attacking creature gets \+(\d+)\/\+(\d+) until end of turn$/))) return [{ k: 'l12Each', sel: { other: true, atk: true }, p: +m[1], t: +m[2], kws: [] }];
+  if ((m = s.match(/^other ([a-z, ]+?) you control gain ([a-z ,]+?) until end of turn$/))) {
+    const subs = m[1].split(/,? and |, /).map(FX_SING); const kws = l12KwList(m[2]); if (!kws.length || kws.join(' and ') !== m[2].replace(/,? and |, /g, ' and ') || subs.some(x => !/^[a-z]+$/.test(x) || L12_TYPES.includes(x))) return null;
+    return [{ k: 'l12Each', sel: { other: true, subs }, p: 0, t: 0, kws }];
+  }
+  if ((m = s.match(/^untap each other ([a-z]+) you control$/)) && !L12_TYPES.includes(FX_SING(m[1]))) return [{ k: 'l12Each', sel: { other: true, subs: [FX_SING(m[1])] }, untap: true }];
+  if (/^untap all tokens you control$/.test(s)) return [{ k: 'l12Each', sel: { tok: true }, untap: true }];
+  if (/^put a loyalty counter on each planeswalker you control$/.test(s)) return [{ k: 'l12Loy' }];
+  // Auras
+  if ((m = s.match(/^enchanted creature gains ([a-z ,]+?) until end of turn$/))) { const kws = l12KwList(m[1]); if (!kws.length || kws.join(' and ') !== m[1].replace(/,? and |, /g, ' and ')) return null; return [{ k: 'l12EnchKw', kws }]; }
+  if (/^tap enchanted creature$/.test(s)) return [{ k: 'l12EnchTap' }];
+  // tokens
+  if (L12_PLANET_ALL.test(s) || /^create a tapped new planet token$/.test(s)) return [{ k: 'l12Planet' }];
+  if ((m = s.match(/^create ([a-z' ]+), a legendary (\d+)\/(\d+) ((?:white|blue|black|red|green|colorless)(?: and (?:white|blue|black|red|green))?) ([a-z ]+?) creature token(?: with ([a-z ,]+))?$/))) {
+    const kws = m[6] ? l12KwList(m[6]) : []; if (m[6] && kws.join(' and ') !== m[6].replace(/,? and |, /g, ' and ')) return null;
+    const cap1 = w => w.split(' ').map(x => x ? x[0].toUpperCase() + x.slice(1) : x).join(' ');
+    return [{ k: 'l12Named', name: cap1(m[1]), p: +m[2], t: +m[3], colors: m[4].split(' and ').map(x => L12_COL[x]).filter(Boolean), types: cap1(m[5]), kws }];
+  }
+  if ((m = s.match(/^each player creates an? (food|treasure|clue) token$/))) return [{ k: 'l12EachTok', what: m[1] }];
+  // counts
+  if ((m = s.match(/^draw cards equal to (.+)$/))) { const sp = l9CountSpec(m[1]); const d = pe('draw a card'); if (!sp || d.length !== 1) return null; return [Object.assign({}, d[0], { n: 0, l11cnt: sp })]; }
+  if ((m = s.match(/^you gain life equal to (.+)$/))) { const sp = l9CountSpec(m[1]); if (!sp) return null; return [{ k: 'gain', n: 0, l11cnt: sp }]; }
+  if ((m = s.match(/^(?:~|it) deals damage equal to (the greatest power among creatures you control|the number of instant and sorcery cards in your graveyard) to target (creature an opponent controls|creature or planeswalker|creature)$/))) { const sp = l9CountSpec(m[1]); if (!sp) return null; return [{ k: 'dmg', n: 0, f: m[2], l11cnt: sp }]; }
+  if ((m = s.match(/^if you have fewer than (\w+) cards in hand, draw cards equal to the difference$/)) && cdNum(m[1]) > 0) return [{ k: 'l12DrawDiff', n: cdNum(m[1]) }];
+  // spells with a condition on the target
+  if ((m = s.match(/^destroy target (.+?)\. if its mana value was (\d+) or less, (create an? [a-z]+ token)$/))) {
+    const d = pe('destroy target ' + m[1]), tk = pe(m[3]); if (d.length !== 1 || d[0].k !== 'destroy' || tk.length !== 1) return null;
+    return [Object.assign({}, d[0], { l7mark: true }), Object.assign({}, tk[0], { cnd: { k: 'l12tgt', mvMax: +m[2], text: `its mana value was ${m[2]} or less` } })];
+  }
+  if ((m = s.match(/^destroy target creature or enchantment\. if an enchantment was destroyed this way, you lose (\d+) life$/))) return [{ k: 'destroy', f: 'creature or enchantment', l7mark: true }, { k: 'selfLose', n: +m[1], cnd: { k: 'l12tgt', ench: true, gone: true, text: 'an enchantment was destroyed this way' } }];
+  if (/^destroy target creature\. if it wasn't attacking, its controller draws a card$/.test(s)) return [{ k: 'destroy', f: 'creature', l7mark: true }, { k: 'l12CtlDraw', cnd: { k: 'l12tgt', notAtk: true, text: "it wasn't attacking" } }];
+  if ((m = s.match(/^target creature gets -(\d+)\/-0 until end of turn\. then if that creature's power is 0 or less, destroy it$/))) return [{ k: 'pumpT', p: -m[1], t: 0, f: 'creature', foe: true, l7mark: true }, { k: 'l12DestroyP0' }];
+  if ((m = s.match(/^target creature gets \+(\d+)\/\+(\d+) and gains ([a-z ]+) until end of turn\. if it's an? ([a-z]+), you gain (\d+) life$/))) { const kws = l12KwList(m[3]); if (!kws.length || kws.join(' and ') !== m[3]) return null; return [{ k: 'pumpT', p: +m[1], t: +m[2], kws, f: 'creature', l7mark: true }, { k: 'gain', n: +m[5], cnd: { k: 'l12tgt', sub: m[4], text: `it's a ${m[4]}` } }]; }
+  if ((m = s.match(/^target creature you control gains ([a-z ]+) until end of turn\. if it has a \+1\/\+1 counter on it, draw a card$/))) { const kws = l12KwList(m[1]); if (!kws.length || kws.join(' and ') !== m[1]) return null; return [{ k: 'pumpT', p: 0, t: 0, kws, f: 'creature you control', l7mark: true }, { k: 'draw', n: 1, cnd: { k: 'l12tgt', p1: true, text: 'it has a +1/+1 counter on it' } }]; }
+  if ((m = s.match(/^creatures you control get \+(\d+)\/\+(\d+) until end of turn\. if it's not your turn, untap those creatures$/))) { const b = pe(`creatures you control get +${m[1]}/+${m[2]} until end of turn`); if (b.length !== 1) return null; return [b[0], { k: 'l12UntapIfNot' }]; }
+  if ((m = s.match(/^~ deals (\d+) damage to target creature\. if excess damage was dealt this way, (create an? [a-z]+ token)$/))) { const tk = pe(m[2]); if (tk.length !== 1) return null; return [{ k: 'l12DmgExcess', n: +m[1], then: tk[0] }]; }
+  if ((m = s.match(/^~ deals (\d+) damage to target creature\. you may exile a card from your graveyard\. if you do, ~ also deals (\d+) damage to that creature's controller$/))) return [{ k: 'dmg', n: +m[1], f: 'creature', l7mark: true }, { k: 'l12GyDmgCtl', n: +m[2] }];
+  if ((m = s.match(/^target creature deals damage equal to its power to itself\. if that creature is attacking, ~ deals (\d+) damage to that creature's controller$/))) return [{ k: 'l12Wise', n: +m[1] }];
+  if (/^look at the top two cards of your library\. put one into your hand and the other into your graveyard$/.test(s)) return [{ k: 'l12LookTwo' }];
+  if ((m = s.match(/^you may discard a card\. if you do, (search your library for .+)$/))) { const tu = pe(m[1]); if (tu.length !== 1 || tu[0].k !== 'tutor') return null; return [{ k: 'l12DiscTutor', tut: tu[0] }]; }
+  return null;
+}
+// rewrites that keep the meaning for this engine: «up to one target card from a graveyard», «a -1/-1 counter on up
+// to one target creature», «this spell deals …» (mode names are already removed where modes are read)
+function l12Rewrite(s) {
+  if (/\bup to one target card from a graveyard\b/.test(s)) return s.replace(/\bup to one target card from a graveyard\b/, 'target card from a graveyard');
+  if (/^put a -1\/-1 counter on up to one target creature$/.test(s)) return 'put a -1/-1 counter on target creature';
+  if (/^this spell deals /.test(s)) return s.replace(/^this spell deals /, '~ deals ');
+  return null;
+}
+// split «A. B. C» into sentences, not inside quotes («… with "{T}: Add one mana of any color."»)
+function l12Split(t) { const out = []; let q = false, cur = ''; for (let i = 0; i < t.length; i++) { const ch = t[i]; if (ch === '"') q = !q; if (!q && ch === '.' && t[i + 1] === ' ') { out.push(cur.trim()); cur = ''; i++; continue; } cur += ch; } if (cur.trim()) out.push(cur.trim().replace(/\.$/, '')); return out; }
+const L12_ALONE = new Set(['l12Planet', 'l12Named', 'l12EachTok', 'l12Loy']);
+{ const _pe12 = parseEffects; parseEffects = function (s) {
+  const r = _pe12(s); if (typeof s !== 'string') return r;
+  const t = s.trim().replace(/\.$/, '');
+  // a sentence the old parser dropped silently inside a longer text (an activated ability that also makes a Planet)
+  const parts = l12Split(t);
+  if (parts.length > 1 && !parts.some(p => /^(if|then|otherwise)\b/.test(p))) {
+    const mine = parts.map(p => { const o = l12Sentence(p, _pe12); return o && o.every(x => L12_ALONE.has(x.k)) ? o : null; });
+    if (mine.some(Boolean)) {
+      const rest = parts.filter((p, i) => !mine[i]).join('. '); const head = rest ? parseEffects(rest) : [];
+      if (!rest || head.length) { const all = [...head, ...mine.filter(Boolean).flat()]; if (all.length > (r || []).length) return all; }
+    }
+  }
+  if (r && r.length) return r;
+  const own = l12Sentence(t, _pe12); if (own) return own;
+  const rw = l12Rewrite(t); if (rw && rw !== t) { const r2 = parseEffects(rw); if (r2 && r2.length) return r2; }
+  return r;
+}; }
+
+/* ---------- targets ---------- */
+EOE_TGT.l12T = {
+  valid: (op, ctx, x) => { const c = x && x.card; if (!l12Match(c, op.req, ctx.seat, l11Src(ctx), true)) return false; if (op.need === 'attacking' && c.atk == null) return false; if (op.need === 'blocking' && c.blocking == null) return false; if (op.need === 'attacking or blocking' && c.atk == null && c.blocking == null) return false; return op.base.k === 'pumpT' || op.base.k === 'dmg' ? isCreature(c) : true; },
+  target: (op, ctx) => {
+    const s = ctx.seat; const ok = permsAll().filter(c => EOE_TGT.l12T.valid(op, ctx, { card: c }) && l12Match(c, op.req, s, l11Src(ctx), false));
+    if (op.blink || (op.base.k === 'bounce' && op.req.you === true)) return bestBy(ok.filter(c => c.ctl === s && !c.token && AB(c).etb.length), c => AB(c).etb.length * 3 + value(c) * 0.1) || null;
+    if (op.harm) return bestBy(ok.filter(c => c.ctl !== s && alive(c.ctl) && !(op.base.k === 'destroy' && hasKw(c, 'indestructible'))), c => value(c) + (op.base.k === 'dmg' && toughLeft(c) <= op.base.n ? 5 : 0)) || null;
+    return bestBy(ok.filter(c => c.ctl === s), c => value(c) + (op.base.k === 'l12Untap' && c.tapped ? 6 : 0) + (c.atk != null ? 2 : 0)) || null;
+  }
+};
+const l12CreOpp = (op, ctx) => bestBy(permsAll().filter(c => c.ctl !== ctx.seat && alive(c.ctl) && isCreature(c) && matchFilter(c, 'creature', ctx.seat, false)), c => value(c) + (toughLeft(c) <= (op.n || 0) ? 5 : 0)) || null;
+EOE_TGT.l12DmgExcess = { valid: (op, ctx, x) => !!(x && x.card && x.card.zone === 'bf' && isCreature(x.card)), target: l12CreOpp };
+EOE_TGT.l12Double = { valid: (op, ctx, x) => !!(x && x.card && x.card.zone === 'bf' && isCreature(x.card)), target: (op, ctx) => bestBy(permsOf(ctx.seat).filter(c => isCreature(c) && P(c) > 0), c => P(c) + (c.atk != null ? 5 : 0)) || null };
+EOE_TGT.l12Wise = { valid: (op, ctx, x) => !!(x && x.card && x.card.zone === 'bf' && isCreature(x.card)), target: (op, ctx) => bestBy(permsAll().filter(c => c.ctl !== ctx.seat && alive(c.ctl) && isCreature(c) && matchFilter(c, 'creature', ctx.seat, false) && P(c) > 0), c => (P(c) >= toughLeft(c) ? 6 : 0) + (c.atk != null ? 2 : 0) + value(c)) || null };
+
+/* ---------- ops ---------- */
+function l12Each(op, ctx) {
+  const s = ctx.seat; const src = l11Src(ctx); const sel = op.sel || {};
+  return permsOf(s).filter(c => (sel.tok ? c.token : isCreature(c)) && (!sel.other || !src || c.id !== src.id) && (!sel.atk || c.atk != null) && (!sel.subs || fxIs(c, sel.subs)));
+}
+function l12ReanDo(s, c) { if (!c || c.zone !== 'gy') return; moveCard(c, 'bf', { ctl: s }); log(`${pn(s)} devuelve ${cn(c)} de su cementerio al campo de batalla.`, 'good'); }
+function l12ReanList(op, s) { return G.p[s].gy.map(id => G.cards[id]).filter(c => c && l12DefMatch(D(c), op.req) && (D(c).cmc || 0) <= op.max); }
+function l12GyDmgDo(s, c, o, n, src) { if (!c || c.zone !== 'gy') return; moveCard(c, 'exile'); log(`${pn(s)} exilia ${cn(c)} de su cementerio.`); damagePlayer(o, n, src); log(`${src ? cn(src) : 'El hechizo'} hace ${n} de daño a ${pn(o)}.`, 'bad'); }
+function l12LookTwoDo(s, keep, top) { moveCard(keep, 'hand'); for (const c of top) if (c !== keep) moveCard(c, 'gy'); log(`${pn(s)} se queda una de las dos primeras cartas y pone la otra en el cementerio.`); }
+Object.assign(XOPS, {
+  l12T(op, ctx, t) {
+    if (!t || !EOE_TGT.l12T.valid(op, ctx, { card: t })) return;
+    ctx.l12Pre = l12Note(t);
+    if (op.base.k === 'l12Untap') { if (t.tapped) { t.tapped = false; log(`${cn(t)} se endereza.`); } ctx.lastTgt = t.id; return; }
+    if (op.base.k === 'l12Blink') { const o = t.owner; moveCard(t, 'exile'); if (t.zone !== 'exile') return; moveCard(t, 'bf', { ctl: o, tapped: !!op.base.tapped }); log(`${cn(t)} se exilia y vuelve al campo${op.base.tapped ? ' girado' : ''}.`); return; }
+    applyOp(Object.assign({}, op.base), ctx, t); ctx.lastTgt = t.id;
+  },
+  l12Rean(op, ctx) { const s = ctx.seat; l12ReanDo(s, bestBy(l12ReanList(op, s), c => value(c))); },
+  l12Each(op, ctx) {
+    const list = l12Each(op, ctx); if (!list.length) return;
+    for (const c of list) { if (op.untap) c.tapped = false; else { c.tp += op.p || 0; c.tt += op.t || 0; if (op.kws) c.tkw.push(...op.kws); } }
+    log(op.untap ? `${list.map(cn).join(', ')} se enderezan.` : `${list.map(cn).join(', ')} obtienen${op.p || op.t ? ` +${op.p}/+${op.t}` : ''}${op.kws && op.kws.length ? ' ' + op.kws.map(k => KW_ES[k] || k).join(', ') : ''} hasta el final del turno.`);
+  },
+  l12Double(op, ctx, t) { if (!t || t.zone !== 'bf' || !isCreature(t)) return; const p = P(t), tt = T(t); t.tp += p; t.tt += tt; log(`${cn(t)} dobla su fuerza y resistencia (+${p}/+${tt}) hasta el final del turno.`); },
+  l12Loy(op, ctx) { const list = permsOf(ctx.seat).filter(isPW); for (const c of list) addCounters(c, 1, 'loy', true); if (list.length) log(`${list.map(cn).join(', ')} reciben un contador de lealtad.`); },
+  l12EnchKw(op, ctx) { const a = l11Src(ctx); const c = a && a.att != null ? G.cards[a.att] : null; if (!c || c.zone !== 'bf') return; c.tkw.push(...op.kws); log(`${cn(c)} gana ${op.kws.map(k => KW_ES[k] || k).join(' y ')} hasta el final del turno.`); },
+  l12EnchTap(op, ctx) { const a = l11Src(ctx); const c = a && a.att != null ? G.cards[a.att] : null; if (!c || c.zone !== 'bf' || c.tapped) return; tapPerm(c); log(`${cn(c)} se gira.`); },
+  l12Planet(op, ctx) { const s = ctx.seat; if (tokenCap(s)) return; makeToken(s, { name: 'New Planet', type: 'Token Land — Planet', text: '{T}: Add one mana of any color.', tapped: true, uniq: 'planet' }); log(`${pn(s)} crea una ficha de tierra Planeta «New Planet» girada.`); },
+  l12Named(op, ctx) { const s = ctx.seat; if (tokenCap(s)) return; makeToken(s, { name: op.name, p: op.p, t: op.t, colors: op.colors, kws: op.kws, type: 'Token Legendary Creature — ' + op.types }); log(`${pn(s)} crea ${esc(op.name)}, una ficha legendaria ${op.p}/${op.t}.`); },
+  l12EachTok(op, ctx) { for (const o of aliveSeats()) applyOp({ k: op.what === 'clue' ? 'avClue' : op.what, n: 1 }, Object.assign({}, ctx, { seat: o }), null); },
+  l12DrawDiff(op, ctx) { const s = ctx.seat; const n = op.n - G.p[s].hand.length; if (n > 0) { drawCards(s, n); log(`${pn(s)} roba ${n} carta${n > 1 ? 's' : ''} (hasta tener ${op.n}).`); } },
+  l12CtlDraw(op, ctx) { const c = l11Last(ctx); const o = ctx.l12Pre ? ctx.l12Pre.ctl : c && c.ctl; if (o == null || !alive(o)) return; drawCards(o, 1); log(`${pn(o)} roba una carta.`); },
+  l12DestroyP0(op, ctx) { const c = l11Last(ctx); if (!c || c.zone !== 'bf' || P(c) > 0) return; log(`${cn(c)} tiene fuerza 0 o menos y se destruye.`, 'bad'); destroy(c); },
+  l12UntapIfNot(op, ctx) { const s = ctx.seat; if (G.active === s) return; const list = permsOf(s).filter(c => isCreature(c) && c.tapped); for (const c of list) c.tapped = false; if (list.length) log(`No es el turno de ${pn(s)}: sus criaturas se enderezan.`); },
+  l12DmgExcess(op, ctx, t) { if (!t || t.zone !== 'bf') return; const lethal = Math.max(0, toughLeft(t)); dealDamage(t, op.n, l11Src(ctx)); log(`${cn(t)} recibe ${op.n} de daño.`, 'bad'); if (op.n > lethal) applyOp(op.then, ctx, null); },
+  l12GyDmgCtl(op, ctx) { const s = ctx.seat; const o = ctx.l11TgtCtl != null ? ctx.l11TgtCtl : ctx.l12Pre && ctx.l12Pre.ctl; if (o == null || o === s || !alive(o)) return; const c = bestBy(G.p[s].gy.map(id => G.cards[id]).filter(Boolean), x => -value(x)); if (c) l12GyDmgDo(s, c, o, op.n, l11Src(ctx)); },
+  l12Wise(op, ctx, t) { if (!t || t.zone !== 'bf') return; const atk = t.atk != null; const n = Math.max(0, P(t)); if (n) { dealDamage(t, n, t); log(`${cn(t)} se hace ${n} de daño a sí misma.`, 'bad'); } if (atk && alive(t.ctl)) { damagePlayer(t.ctl, op.n, l11Src(ctx)); log(`${pn(t.ctl)} recibe ${op.n} de daño (su criatura estaba atacando).`, 'bad'); } },
+  l12LookTwo(op, ctx) { const s = ctx.seat; const top = G.p[s].lib.slice(0, 2).map(id => G.cards[id]); if (!top.length) return; l12LookTwoDo(s, bestBy(top, c => value(c) + (isLand(c) && permsOf(s).filter(isLand).length < 5 ? 4 : 0)), top); },
+  l12DiscTutor(op, ctx) { const s = ctx.seat; const hand = G.p[s].hand.map(id => G.cards[id]); if (hand.length < 2) return; const c = l11DiscardPick(s, hand); if (!c) return; moveCard(c, 'gy'); log(`${pn(s)} descarta ${cn(c)}.`); applyOp(op.tut, ctx, null); },
+  l12AloneDo(op, ctx) { const c = G.cards[op.id]; if (!c || c.zone !== 'bf') return; c.tp += op.p || 0; c.tt += op.t || 0; if (op.kws && op.kws.length) c.tkw.push(...op.kws); log(`${cn(c)} ataca sola: ${op.p || op.t ? `+${op.p}/+${op.t}` : ''}${op.kws && op.kws.length ? (op.p || op.t ? ' y ' : '') + op.kws.map(k => KW_ES[k] || k).join(' y ') : ''} hasta el final del turno.`); }
+});
+Object.assign(XPROMPT, {
+  async l12Rean(op, pr) { const s = pr.ctx.seat; const list = l12ReanList(op, s); if (!list.length) return; let c = null; for (let k = 0; !c && k < 40; k++) c = __R(ME, G, await pickFromList(list, `${pr.title}: elige la carta de tu cementerio`)); l12ReanDo(s, c || list[0]); },
+  async l12GyDmgCtl(op, pr) { const s = pr.ctx.seat; const o = pr.ctx.l11TgtCtl != null ? pr.ctx.l11TgtCtl : pr.ctx.l12Pre && pr.ctx.l12Pre.ctl; const list = G.p[s].gy.map(id => G.cards[id]).filter(Boolean); if (o == null || !alive(o) || !list.length) return; const c = __R(ME, G, await pickFromList(list, `${pr.title}: puedes exiliar una carta de tu cementerio para hacer ${op.n} de daño a ${pn(o)} (Cancelar = no)`)); if (c) l12GyDmgDo(s, c, o, op.n, l11Src(pr.ctx)); },
+  async l12LookTwo(op, pr) { const s = pr.ctx.seat; const top = G.p[s].lib.slice(0, 2).map(id => G.cards[id]); if (!top.length) return; let c = null; for (let k = 0; !c && k < 40; k++) c = __R(ME, G, await pickFromList(top, `${pr.title}: elige la carta que va a tu mano (la otra va al cementerio)`)); l12LookTwoDo(s, c || top[0], top); },
+  async l12DiscTutor(op, pr) { const s = pr.ctx.seat; if (!G.p[s].hand.length) return; if (!__R(ME, G, await askYesNo(pr.title, '¿Descartar una carta para buscar en tu biblioteca?'))) return; let c = null; for (let k = 0; !c && k < 40 && G.p[s].hand.length; k++) c = __R(ME, G, await pickFromList(G.p[s].hand.map(id => G.cards[id]), `${pr.title}: descarta una carta`)); if (!c) return; moveCard(c, 'gy'); log(`${pn(s)} descarta ${cn(c)}.`); const n1 = UI.prompts.length; userOps([op.tut], pr.ctx, pr.ctx.src); __R(ME, G, await resolveNewPrompts(n1)); }
+});
+Object.assign(XTEXT, {
+  l12T: o => o.text, l12Rean: o => o.text, l12Each: o => o.untap ? 'Enderezar tus permanentes elegidos' : `Tus criaturas elegidas obtienen${o.p || o.t ? ` +${o.p}/+${o.t}` : ''}${o.kws && o.kws.length ? ' ' + o.kws.map(k => KW_ES[k] || k).join(', ') : ''}`,
+  l12Loy: () => 'Un contador de lealtad en cada planeswalker tuyo', l12EnchKw: o => `La criatura encantada gana ${o.kws.map(k => KW_ES[k] || k).join(' y ')} hasta final de turno`, l12EnchTap: () => 'Girar la criatura encantada',
+  l12Planet: () => 'Ficha de tierra Planeta «New Planet» girada (maná de cualquier color)', l12Named: o => `Crear ${o.name}, ficha legendaria ${o.p}/${o.t}`, l12EachTok: o => `Cada jugador crea una ficha de ${o.what === 'food' ? 'Comida' : o.what === 'treasure' ? 'Tesoro' : 'Pista'}`,
+  l12DrawDiff: o => `Robar hasta tener ${o.n} cartas`, l12CtlDraw: () => 'Su controlador roba una carta', l12DestroyP0: () => 'Si su fuerza es 0 o menos, se destruye', l12UntapIfNot: () => 'Si no es tu turno, enderezar tus criaturas',
+  l12DmgExcess: o => `${o.n} de daño a una criatura; si hay exceso, ${XTEXT[o.then.k] ? XTEXT[o.then.k](o.then) : 'crear la ficha'}`, l12GyDmgCtl: o => `Puedes exiliar una carta de tu cementerio: ${o.n} de daño al controlador`, l12Wise: o => `La criatura se hace daño igual a su fuerza; si ataca, ${o.n} de daño a su controlador`,
+  l12Double: () => 'Doblar la fuerza y la resistencia de una criatura', l12LookTwo: () => 'Mirar 2: una a la mano y otra al cementerio', l12DiscTutor: () => 'Puedes descartar una carta para buscar en tu biblioteca', l12AloneDo: () => 'La criatura que ataca sola mejora hasta final de turno'
+});
 </script>
 
 <script src="/config.js"></script>
