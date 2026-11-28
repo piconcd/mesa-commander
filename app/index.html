@@ -16663,6 +16663,7 @@ const L14_CNT = { 'the number of creatures on the battlefield': 'creaturesAll', 
       const a = AB(x);
       if (a.l14Thorin) { const n = permsOf(x.ctl).filter(c => c.token && isType(c, 'artifact')).length; if (n) for (const c of permsOf(x.ctl)) if (c !== x && isCreature(c) && l14IsType(c, 'dwarf')) M(c).p += n; }
       if (a.l14KollTok) for (const c of permsOf(x.ctl)) if (c.token && isCreature(c) && l14Attached(c).some(y => isType(y, 'aura') || isType(y, 'equipment'))) { M(c).p += 1; M(c).t += 1; }
+      if (a.l15Bruenor) for (const c of permsOf(x.ctl)) if (isCreature(c)) { const n = permsAll().filter(y => y.att === c.id && isType(y, 'equipment')).length; if (n) M(c).p += 2 * n; }
       if (a.l14PerArtEnch && x.att != null) { const h = G.cards[x.att]; if (h && h.zone === 'bf') { const n = permsOf(x.ctl).filter(c => isType(c, 'artifact') || isType(c, 'enchantment')).length; M(h).p += n; M(h).t += n; } }
     }
   } catch (e) { console.error(e); }
@@ -16889,7 +16890,7 @@ function l14TypeOkDef(c, f) { return f.split(' or ').some(w => typeMatchDef(D(c)
 function l14AirDo(s, list, ctx) { for (const t of list) XOPS.avAirbend({ f: 'creature' }, ctx, t); }
 function l14RiteDo(s, o, op, src) { if (o == null || !alive(o)) return; if (G.p[o].life !== op.life) { log(`${pn(o)} no tiene exactamente ${op.life} vidas: no pasa nada.`); return; } damagePlayer(o, op.n, src); log(`${src ? cn(src) : 'El hechizo'} hace ${op.n} de daño a ${pn(o)}.`, 'bad'); }
 function l14TypePumpDo(s, type, op) { const list = permsOf(s).filter(c => isCreature(c) && (creTypes(D(c)).includes(type) || abOf(D(c)).kw.has('changeling'))); for (const c of list) { c.tp += op.p; c.tt += op.t; c.tkw.push(...op.kws); } log(`${pn(s)} elige ${type}: ${list.length ? list.map(cn).join(', ') + ` obtienen +${op.p}/+${op.t} y ganan ${op.kws.map(k => KW_ES[k] || k).join(' y ')}` : 'ninguna criatura'} hasta el final del turno.`); recomputeMods(); }
-function l14GambitDo(s, list, op, src) { for (const c of list) { if (c.zone !== 'bf') continue; dealDamage(c, op.dmg, src); c.x26NoBlk = G.turnsTaken; (c.l14NoBlk = G.turnsTaken); } if (list.length) log(`${src ? cn(src) : 'El hechizo'} hace ${op.dmg} de daño a ${list.map(cn).join(', ')}, que no pueden bloquear este turno.`); }
+function l14GambitDo(s, list, op, src) { for (const c of list) { if (c.zone !== 'bf') continue; if (op.dmg > 0) dealDamage(c, op.dmg, src); c.x26NoBlk = G.turnsTaken; (c.l14NoBlk = G.turnsTaken); } if (list.length) log(op.dmg > 0 ? `${src ? cn(src) : 'El hechizo'} hace ${op.dmg} de daño a ${list.map(cn).join(', ')}, que no pueden bloquear este turno.` : `${list.map(cn).join(', ')} no pueden bloquear este turno.`); }
 function l14GaleDo(s, o, op, src) { if (o == null) return; for (const c of permsOf(o).filter(isCreature)) c.l14NoBlk = G.turnsTaken; const hit = permsOf(o).filter(c => isCreature(c) && (D(c).colors || []).some(k => op.cols.includes(k))); for (const c of hit) dealDamage(c, op.n, src); log(`Las criaturas de ${pn(o)} no pueden bloquear este turno${hit.length ? `; ${src ? cn(src) : 'el hechizo'} hace ${op.n} de daño a ${hit.map(cn).join(', ')}` : ''}.`, 'bad'); }
 { const _cb14 = canBlock; canBlock = function (b, a) { if (b && b.l14NoBlk === G.turnsTaken) return false; return _cb14.apply(this, arguments); }; }
 function l14Lieut(s) { return permsOf(s).some(c => c.isCmd && c.owner === s); }
@@ -17026,7 +17027,7 @@ function l14CrewMake(s) { const n = permsOf(s).filter(c => isType(c, 'vehicle') 
 // «Comprobar cartas» shows the extra costs (energy, tapping creatures…) of an activated ability
 { const _al14 = actLabel; actLabel = function (act) { const r = _al14.apply(this, arguments); try { const xs = (act && act.xc || []).map(x26XcLabel); if (!xs.length) return r; return r.replace(/^(Activar \()([^)]*)\)/, (m0, a, b) => a + [b === 'gratis' ? '' : b, ...xs].filter(Boolean).join(', ') + ')'); } catch (e) { return r; } }; }
 // «Comprobar cartas»: damage that depends on what you control is shown as X
-{ for (const k of ['x26Dmg', 'x26DmgEachOpp']) { const _t = XTEXT[k]; if (_t) XTEXT[k] = o => o && o.l14n ? _t(Object.assign({}, o, { n: 'x' })).replace(/\b0 de daño/, 'X de daño') : _t(o); } }
+{ for (const k of ['x26Dmg', 'x26DmgEachOpp']) { const _t = XTEXT[k]; if (_t) XTEXT[k] = o => o && (o.l14n || o.l15lesson != null) ? _t(Object.assign({}, o, { n: 'x' })).replace(/\b0 de daño/, 'X de daño') : _t(o); } }
 // a spell read whole by this block: the leftover warning of its separate lines is not a real one
 const L14_WHOLE = new Set(['l14Slip', 'l14Coup', 'l14Crew']);
 { const _ab14 = abOf; abOf = function (d) { const a = _ab14.apply(this, arguments); try { if (a && a !== EMPTY_AB && !a._l14w && a.spell && a.spell.some(o => L14_WHOLE.has(o.k) || o.l14n === 'raid')) { a._l14w = true; a.unparsed = []; } } catch (e) { console.error(e); } return a; }; }
@@ -17036,7 +17037,7 @@ Object.assign(XTEXT, {
   l14PumpAllX: o => `Tus criaturas obtienen +X/+X${o.kws.length ? ' y ' + o.kws.map(k => KW_ES[k] || k).join(', ') : ''}`, l14ScryIfX: o => `Si X es ${o.min} o más, adivinar ${o.n}`, l14Slip: o => `Una criatura obtiene -${o.a[0]}/-${o.a[1]} (mórbido: -${o.b[0]}/-${o.b[1]})`,
   l14Coup: o => `Crear X ${o.spec.name}; si X ≥ ${o.min}, destruir las demás criaturas`, l14WipeNT: () => 'Destruir todas las criaturas que no son fichas', l14UntapLands: o => o.n >= 999 ? 'Enderezar todas tus tierras' : `Enderezar hasta ${o.n} tierras`,
   l14RegenAll: () => 'Regenerar cada criatura tuya', l14Rite: o => `Si un jugador tiene exactamente ${o.life} vidas, ${o.n} de daño`, l14Hunger: () => 'Indestructible; roba si tiene un contador +1/+1',
-  l14TypePump: o => `Elegir un tipo: tus criaturas de ese tipo +${o.p}/+${o.t} y ${o.kws.map(k => KW_ES[k] || k).join(', ')}`, l14Raze: () => 'Destruir un artefacto; si su valor era 1 o menos, robar', l14Gambit: o => `${o.dmg} de daño a hasta ${o.n} criaturas, que no pueden bloquear`,
+  l14TypePump: o => `Elegir un tipo: tus criaturas de ese tipo +${o.p}/+${o.t} y ${o.kws.map(k => KW_ES[k] || k).join(', ')}`, l14Raze: () => 'Destruir un artefacto; si su valor era 1 o menos, robar', l14Gambit: o => o.dmg > 0 ? `${o.dmg} de daño a hasta ${o.n} criaturas, que no pueden bloquear` : `Hasta ${o.n} criaturas no pueden bloquear`,
   l14Gale: o => `Las criaturas de un jugador no pueden bloquear; ${o.n} de daño a las blancas y/o azules`, l14DrawArtMv: () => 'Robar tantas como el mayor valor de maná de tus artefactos', l14Culling: o => `Destruir los permanentes no tierra de valor ${o.mv} o menos y añadir maná`,
   l14FestScry: () => 'Si tienes tres tipos de tierra básica, adivinar 1', l14Fabled: () => 'Buscar una tierra básica girada; con cuatro tierras, enderezarla', l14AirMany: o => `Airbend ${o.n === 99 ? 'los objetivos que quieras' : 'hasta ' + o.n + ' objetivos'}`,
   l14M1Src: () => 'Un contador -1/-1 en esta criatura', l14Kederekt: () => 'Si controlas un permanente rojo, puedes hacerle 1 de daño', l14LandsAmt: () => 'Buscar tantas tierras como daño y ponerlas giradas', l14RevAll: o => `Revelar ${o.n}: todas las de ${o.f} ${o.to === 'bf' ? 'al campo' : 'a la mano'}`,
@@ -17048,6 +17049,782 @@ Object.assign(XTEXT, {
   l14Reactor: () => 'Daño igual a sus contadores de carga a un jugador y a hasta una criatura', l14Akiri: () => 'Puedes desanexar un Equipo: la criatura se gira y gana indestructible', l14Pyre: o => `Buscar una criatura de valor +1${o.share ? ' que comparta tipo' : ''} y ponerla en el campo`,
   l14ItKw: o => `Gana ${KW_ES[o.kw] || o.kw}`, l14EqPump: o => `La criatura equipada obtiene +${o.p}/+${o.t}`, l14Lose: o => `Pierde ${o.n} vida`, l14ToHand: () => 'Devolver esa carta a la mano', l14AtkTok: o => `Crear ${o.spec.name} atacando`, l14KwOn: o => `Gana ${KW_ES[o.kw] || o.kw}`,
   l14BattleCry: () => 'Grito de batalla', l14Ctr: o => `Un contador (${o.kind})`, l14Clock: () => 'Barajar mano y cementerio y robar siete', l14SacNon: o => `Ese jugador sacrifica una criatura que no sea ${o.not}`, l14Germ: () => 'Germen 0/0 y anexarlo', l14Charge: o => `${o.n} contadores de carga`
+});
+/* =====================================================================
+   Tanda 15 (the decks of Picón CD: the «medium» cards).
+   · Casting from other zones: free from your hand (Yue, Epistolary Librarian, Electrodominance), from among cards you
+     look at (Aetherworks Marvel, Solstice Revelations), hideaway cards (Spinerock Knoll, Cemetery Tampering), the top
+     of your library (Hakoda, One with the Multiverse), cards exiled by Azula, Cunning Usurper and Maralen.
+   · Alternative costs a person chooses when casting: pay life (Demon of Fate's Design, Access Maze), pay eight {E}
+     (Nissa, Worldsoul Speaker), free once per turn (One with the Multiverse). Bots use them too.
+   · «As though it had flash»: The Blue Spirit, Scarring Memories, Timely Ward (then it must enchant a commander).
+   · Squad, strive (Launch the Fleet), optional additional costs (Spirit Water Revival, Redemptor Dreadnought),
+     X in activated-ability costs (Treasure Vault, Defenders of Humanity, Shigeki's channel), «tap X untapped
+     creatures» (Belisarius Cawl), escalate (Collective Effort).
+   · Miracle, and Rooms whose second door now works by itself once unlocked.
+   ===================================================================== */
+const l15Src = ctx => ctx && ctx.src ? (G.cards[ctx.src.id] || ctx.src) : null;
+const l15Opps = s => oppsOf(s).filter(alive);
+const l15Hand = s => G.p[s].hand.map(id => G.cards[id]).filter(Boolean);
+const l15IsCre = c => /\bcreature\b/i.test(D(c).type_line || '');
+const l15Mv = c => D(c).cmc || 0;
+const l15Score = (s, c) => { try { return spellScore(s, c, 'main'); } catch (e) { return l15Mv(c); } };
+
+/* ---------- free casts (during the resolution of an effect) ---------- */
+// bots: the best candidate goes to the pending casts; people choose (or not) and cast it at once
+function l15FreeBot(s, cands) { const c = bestBy(cands.filter(x => !isLand(x) && (isPermDef(D(x)) || l15Score(s, x) > 0)), x => l15Mv(x) * 2 + Math.max(0, l15Score(s, x)) * 0.1); if (!c) return null; (G.pcast ||= []).push({ s, id: c.id, hand: c.zone === 'hand', lib: c.zone === 'lib', gy: c.zone === 'gy' }); log(`${pn(s)} lanzará ${cn(c)} sin pagar su coste.`); return c; }
+async function l15FreeHuman(s, cands, title) {
+  const list = cands.filter(x => !isLand(x)); if (!list.length) { toast('No hay ninguna carta que puedas lanzar así.'); return null; }
+  const c = __R(ME, G, await pickFromList(list, `${title}: puedes lanzar una sin pagar su coste (Cancelar = ninguna)`)); if (!c) return null;
+  c.xVal = 0; c.kicked = false; const n0 = UI.prompts.length; log(`${pn(s)} lanza ${cn(c)} sin pagar su coste.`);
+  __R(ME, G, await castSpell(s, c, { free: true })); __R(ME, G, await resolveNewPrompts(n0)); return c;
+}
+const L15_FREE_F = { noncreature: c => !l15IsCre(c), any: () => true };
+function l15FreeCands(s, op, ctx) { const mx = op.mvCnt ? l15FreeMax(op.mvCnt, ctx) : (op.mv != null ? op.mv : 99); return l15Hand(s).filter(c => !isLand(c) && (L15_FREE_F[op.f || 'any'] || (() => true))(c) && l15Mv(c) <= mx); }
+function l15FreeMax(w, ctx) { const s = ctx.seat; if (w === 'attackers') return permsAll().filter(c => c.atk != null && c.ctl === s && isCreature(c)).length; if (w === 'x') return ctx.amount || 0; return 99; }
+
+/* ---------- alternative costs chosen when casting ---------- */
+function l15Alts(s, c) {
+  const out = []; if (!c || isLand(c) || !G) return out;
+  const mine = permsOf(s); const turn = G.active === s; const mv = l15Mv(c);
+  const fromHand = c.zone === 'hand', fromTop = c.zone === 'lib' && G.p[s].lib[0] === c.id;
+  for (const x of mine) {
+    const a = AB(x); const key = 'l15alt' + x.id;
+    const used = () => x.x26u && x.x26u[key + '@' + G.turnsTaken];
+    if (a.l15LifeEnch && turn && fromHand && isType(c, 'enchantment') && !used() && G.p[s].life >= mv) out.push({ x, key, label: `Pagar ${mv} vidas en vez de su coste (${D(x).name})`, pay: () => { loseLife(s, mv); log(`${pn(s)} paga ${mv} vidas en vez del coste de ${cn(c)} (${cn(x)}).`); } });
+    if (a.l15LifeAny && turn && fromHand && !used() && G.p[s].life >= mv) out.push({ x, key, label: `Pagar ${mv} vidas en vez de su coste (${D(x).name})`, pay: () => { loseLife(s, mv); log(`${pn(s)} paga ${mv} vidas en vez del coste de ${cn(c)} (${cn(x)}).`); } });
+    if (a.l15FreeOnce && turn && (fromHand || fromTop) && !used()) out.push({ x, key, label: `Lanzarlo gratis (${D(x).name}, una vez por turno)`, pay: () => log(`${pn(s)} lanza ${cn(c)} sin pagar su coste (${cn(x)}).`) });
+    if (a.l15NissaE && isPermDef(D(c)) && (pctr(G.p[s]).energy || 0) >= 8) out.push({ x, key: null, label: `Pagar ocho de energía en vez de su coste (${D(x).name})`, pay: () => l14PayE(s, 8) });
+  }
+  return out;
+}
+function l15AltUse(alt) { if (alt.key) { alt.x.x26u ||= {}; alt.x.x26u[alt.key + '@' + G.turnsTaken] = true; } alt.pay(); }
+{ const _up15 = userPlay; userPlay = async function (c) {
+  try {
+    if (G && !G.over && !UI.busy && c && c.owner === ME && !isType(c, 'land') && !UI.mullStage && G.phase !== 'mulligan') {
+      const alts = l15Alts(ME, c);
+      if (alts.length) {
+        if (!isInstantSpeed(c) && !sorcTiming(ME)) { toast('Es de velocidad de conjuro: lánzala en tu fase principal con la pila vacía.'); return; }
+        const i = __R(ME, G, await askChoice(`${D(c).name}: ¿cómo lo pagas?`, ['Pagar su coste normal', ...alts.map(a => a.label)]));
+        if (i == null || +i < 0) return;
+        if (+i > 0) {
+          if (l15NoCast(ME, c)) { toast('No puedes lanzar hechizos desde ahí ahora (Avatar\'s Wrath).', true); return; }
+          pushUndo(); l15AltUse(alts[+i - 1]); c.xVal = 0; c.kicked = false;
+          UI.busy = true; const n0 = UI.prompts.length;
+          try { __R(ME, G, await castSpell(ME, c, { free: true })); __R(ME, G, await resolveNewPrompts(n0)); } catch (e) { if (e !== ABORT) console.error(e); } finally { UI.busy = false; sba(); render(); }
+          return;
+        }
+      }
+      if (l15NoCast(ME, c)) { toast('No puedes lanzar hechizos desde fuera de tu mano hasta tu próximo turno (Avatar\'s Wrath).', true); return; }
+    }
+  } catch (e) { if (e === ABORT) throw e; console.error(e); }
+  return _up15.apply(this, arguments);
+}; }
+// bots: use an alternative cost for the best spell they could not pay (or that is expensive)
+async function l15BotAlts(s) {
+  const p = G.p[s];
+  for (let guard = 0; guard < 3 && !G.over && !p.dead && sorcTiming(s); guard++) {
+    const top = p.lib.length ? G.cards[p.lib[0]] : null;
+    const opts = [];
+    for (const c of [...l15Hand(s), ...(top ? [top] : [])]) for (const alt of l15Alts(s, c)) {
+      if (alt.label.includes('vidas') && p.life - l15Mv(c) < 10) continue;
+      const sc = l15Score(s, c); if (sc <= 0 && !isPermDef(D(c))) continue;
+      opts.push({ c, alt, v: l15Mv(c) * 3 + sc * 0.1 - (alt.label.includes('energía') && solve(s, fullCost(c, s)) ? 10 : 0) });
+    }
+    const best = bestBy(opts.filter(o => o.v > 6), o => o.v); if (!best) return;
+    l15AltUse(best.alt); log(`${pn(s)} lanza ${cn(best.c)} con un coste alternativo.`);
+    __R(ME, G, await castSpell(s, best.c, { free: true })); sba(); render();
+  }
+}
+{ const _bm15 = botMain; botMain = async function (s, phase) { try { __R(ME, G, await l15BotAlts(s)); } catch (e) { if (e === ABORT) throw e; console.error(e); } return _bm15.apply(this, arguments); }; }
+
+/* ---------- Avatar's Wrath: opponents can't cast spells from anywhere other than their hands ---------- */
+function l15NoCast(s, c) { const w = G && G.l15Wrath; if (!w || !c) return false; const live = w.filter(x => x.until > G.turnsTaken && x.by !== s && alive(x.by)); G.l15Wrath = live; return live.length > 0 && c.zone !== 'hand'; }
+{ const _cs15 = castSpell; castSpell = async function (s, c, opts = {}) {
+  if (G && c && l15NoCast(s, c)) { log(`${pn(s)} no puede lanzar ${cn(c)} desde fuera de su mano (Avatar's Wrath).`, 'bad'); return false; }
+  try {
+    if (G && c) {
+      c.l15Cast = true; c.l15WardCmd = !!(AB(c).l15FlashCmd && !sorcTiming(s));
+      // Redemptor Dreadnought: you may exile a creature card from your graveyard as an additional cost
+      if (AB(c).l15Dread && !opts.free) {
+        const gy = G.p[s].gy.map(id => G.cards[id]).filter(x => x && l15IsCre(x)); let pick = null;
+        if (gy.length) { if (isBotSeat(s)) pick = bestBy(gy, x => basePT(D(x).power)); else pick = __R(ME, G, await asSeat(s, () => pickFromList(gy, `${D(c).name}: puedes exiliar una carta de criatura de tu cementerio (Cancelar = no)`))); }
+        c.l15ExP = 0; if (pick) { moveCard(pick, 'exile'); c.l15ExP = Math.max(0, basePT(D(pick).power)); log(`${pn(s)} exilia ${cn(pick)} de su cementerio para ${cn(c)}.`); }
+      }
+    }
+  } catch (e) { if (e === ABORT) throw e; console.error(e); }
+  return _cs15.apply(this, arguments);
+}; }
+{ const _cf15 = chooseSpell; chooseSpell = function (s, phase) { const r = _cf15.apply(this, arguments); if (r && r.c && l15NoCast(s, r.c)) return null; return r; }; }
+
+/* ---------- flash ---------- */
+{ const _ff15 = fxFlash; fxFlash = function (x) {
+  if (_ff15.apply(this, arguments)) return true;
+  try {
+    if (!G || !x || x.owner == null || !G.p[x.owner]) return false; const s = x.owner; const a = abOf(D(x));
+    if (a.l15FlashLegAtk && permsOf(s).some(c => c.atk != null && isCreature(c) && /\blegendary\b/i.test(D(c).type_line || ''))) return true;
+    if (a.l15FlashCmd && permsAll().some(c => c.isCmd && isCreature(c))) return true;
+    if (x.zone === 'exile' && G.active === s) { const g = (G.p[s].impulse || []).find(q => q.ids.includes(x.id)); if (g && g.l15Azula) return true; }
+  } catch (e) { console.error(e); }
+  return false;
+}; }
+// Timely Ward cast as though it had flash: it must enchant a commander
+{ const _vt15 = validTarget; validTarget = function (op, ctx, x) { if (op && op.k === 'attach' && ctx && ctx.src && G.cards[ctx.src.id] && G.cards[ctx.src.id].l15WardCmd && !(x && x.card && x.card.isCmd)) return false; return _vt15.apply(this, arguments); }; }
+{ const _aa15 = aiAuraTarget; aiAuraTarget = function (s, c) { if (c && c.l15WardCmd) return bestBy(permsOf(s).filter(x => x.isCmd && isCreature(x)), x => value(x)) || null; return _aa15.apply(this, arguments); }; }
+
+/* ---------- the top of your library, cards exiled with Azula / Maralen ---------- */
+{ const _tc15 = lotrTopCastOk; lotrTopCastOk = function (s, c) {
+  if (_tc15.apply(this, arguments)) return true;
+  try { if (!c || c.zone !== 'lib' || isLand(c) || G.p[s].lib[0] !== c.id) return false; for (const x of permsOf(s)) { const a = AB(x); if (a.l15TopAll) return true; if (a.l15TopSub && creTypes(D(c)).map(z => z.toLowerCase()).includes(a.l15TopSub)) return true; } } catch (e) { console.error(e); }
+  return false;
+}; }
+{ const _ic15 = impulseCards; impulseCards = function (s) {
+  const r = _ic15.apply(this, arguments);
+  try {
+    return r.filter(c => { const g = (G.p[s].impulse || []).find(q => q.ids.includes(c.id)); if (!g) return true;
+      if (g.l15Azula) return G.active === s && permsOf(s).some(x => x.id === g.l15Azula);
+      if (g.l15Maralen) { const m = permsOf(s).find(x => x.id === g.l15Maralen); if (!m || g.l15T !== G.turnsTaken) return false; const n = permsOf(s).filter(x => l14IsType(x, 'elf') || l14IsType(x, 'faerie')).length; return l15Mv(c) <= n && !(m.x26u && m.x26u['l15mar@' + G.turnsTaken]); }
+      return true; });
+  } catch (e) { console.error(e); return r; }
+}; }
+{ const _ui15 = useImpulse; useImpulse = function (s, c) { try { const g = (G.p[s].impulse || []).find(q => q.ids.includes(c.id)); if (g && g.l15Maralen) { const m = G.cards[g.l15Maralen]; if (m) { m.x26u ||= {}; m.x26u['l15mar@' + G.turnsTaken] = true; } } } catch (e) { console.error(e); } return _ui15.apply(this, arguments); }; }
+
+/* ---------- Squad, strive: paid like multikicker; Spirit Water Revival: waterbend as kicker ---------- */
+{ const _fc15 = fullCost; fullCost = function (c, s) { const r = _fc15.apply(this, arguments); try { const k = AB(c).kicker; if (r && c.kicked && k && k.l15wb) r.wb = (r.wb || 0) + k.l15wb; } catch (e) { console.error(e); } return r; }; }
+{ const _oe15 = onEnter; onEnter = function (c) {
+  const squad = !!(G && c && !c.token && AB(c).l15Squad && c.kickN > 0) ? c.kickN : 0;
+  const cast = !!(c && c.l15Cast); if (c) c.l15Cast = false;
+  const r = _oe15.apply(this, arguments);
+  try {
+    if (squad && c.zone === 'bf') trigger(c, [{ k: 'l15Squad', n: squad }]);
+    if (cast && c.zone === 'bf' && AB(c).l15Unlock1) trigger(c, AB(c).l15Unlock1);
+    const a = G && c && c.zone === 'bf' ? AB(c) : null;
+    if (a && a.l15EntersPerGy) { const n = G.p[c.ctl].gy.map(id => G.cards[id]).filter(x => x && l15IsCre(x)).length; if (n) { addCounters(c, n, 'p1', true); log(`${cn(c)} entra con ${n} contadores +1/+1.`); } }
+  } catch (e) { console.error(e); }
+  return r;
+}; }
+
+/* ---------- X in the cost of activated abilities; «tap X untapped creatures» ---------- */
+X26_COST.unshift(
+  [/^tap x untapped creatures you control$/, () => ({ k: 'tapX' })],
+  [/^remove (two|three) ([a-z]+) counters from ~$/, m => ({ k: 'rmKind', n: x26N(m[1]), kind: m[2] })],
+  [/^sacrifice ~ and a legendary artifact$/, () => ({ k: 'sacSelfLegArt' })],
+  [/^return ~ to its owner's hand$/, () => ({ k: 'bounceSelf' })]
+);
+function l15XMax(act, c, s) { let x = 0; while (x < 30 && solve(s, { generic: (act.generic || 0) + (x + 1) * act.l15xMul, pips: act.pips || [] }, act.tap || act.sac ? c : null)) x++; return x; }
+{ const _lb = x26XcLabel; x26XcLabel = function (x) {
+  if (x.k === 'tapX') return 'girar X criaturas enderezadas';
+  if (x.k === 'xMana') return `pagar X${x.mul > 1 ? ' ×' + x.mul : ''}`;
+  if (x.k === 'rmKind') return `quitar ${x.n} contadores (${x.kind})`;
+  if (x.k === 'sacSelfLegArt') return 'sacrificarla junto con un artefacto legendario';
+  if (x.k === 'bounceSelf') return 'devolverla a la mano';
+  return _lb.apply(this, arguments);
+}; }
+{ const _ck = x26XcCheck; x26XcCheck = function (act, c, s) {
+  for (const x of act.xc || []) {
+    if (x.k === 'rmKind' && (c.cnt[x.kind] || 0) < x.n) return `Necesita ${x.n} contadores (${x.kind}).`;
+    if (x.k === 'sacSelfLegArt' && !permsOf(s).some(y => y !== c && isType(y, 'artifact') && /\blegendary\b/i.test(D(y).type_line || ''))) return 'Necesitas un artefacto legendario para sacrificar.';
+    if (x.k === 'xMana' && isBotSeat(s) && l15XMax(act, c, s) < 1) return 'X sería 0.';
+  }
+  if (act.l15NoCre && permsOf(s).some(isCreature)) return 'Solo si no controlas criaturas.';
+  return _ck.apply(this, arguments);
+}; }
+function l15XcDo(x, ys, c, s, paid, act) {
+  switch (x.k) {
+    case 'tapX': ys.forEach(tapPerm); paid.removed = ys.length; if (ys.length) log(`Se giran ${ys.map(cn).join(', ')} (X = ${ys.length}).`); break;
+    case 'xMana': { const n = ys; if (n > 0) { const sol = solve(s, { generic: n * x.mul, pips: [] }, act && (act.tap || act.sac) ? c : null); if (sol) pay(s, sol); } paid.removed = n; log(`X = ${n}.`); break; }
+    case 'rmKind': c.cnt[x.kind] = Math.max(0, (c.cnt[x.kind] || 0) - x.n); break;
+    case 'sacSelfLegArt': { const y = ys[0]; if (y) { log(`Se sacrifica ${cn(y)}.`); sacrifice(y); } break; }
+    case 'bounceSelf': if (c.zone === 'bf') { moveCard(c, 'hand'); log(`${cn(c)} vuelve a la mano.`); } break;
+  }
+}
+{ const _pb = x26XcPayBot; x26XcPayBot = function (act, c, s) {
+  const r = _pb.apply(this, arguments);
+  for (const x of act.xc || []) {
+    if (x.k === 'tapX') { const ys = permsOf(s).filter(y => y !== c && isCreature(y) && !y.tapped && !(y.sick && false)).sort((a, b) => value(a) - value(b)).slice(0, 6); l15XcDo(x, ys, c, s, r, act); }
+    else if (x.k === 'xMana') l15XcDo(x, l15XMax(act, c, s), c, s, r, act);
+    else if (x.k === 'sacSelfLegArt') l15XcDo(x, [bestBy(permsOf(s).filter(y => y !== c && isType(y, 'artifact') && /\blegendary\b/i.test(D(y).type_line || '')), y => -value(y))], c, s, r, act);
+    else if (['rmKind', 'bounceSelf'].includes(x.k)) l15XcDo(x, [], c, s, r, act);
+  }
+  return r;
+}; }
+{ const _ph = x26XcPayHuman; x26XcPayHuman = async function (act, c) {
+  const plan = __R(ME, G, await _ph.apply(this, arguments)); if (!plan) return plan;
+  for (const p of plan) {
+    const x = p[0];
+    if (x.k === 'tapX') { const lst = permsOf(ME).filter(y => y !== c && isCreature(y) && !y.tapped); const got = []; for (let i = 0; i < lst.length; i++) { const y = __R(ME, G, await pickFromList(lst.filter(q => !got.includes(q)), `Elige criaturas para girar (X = ${got.length}; Cancelar = terminar)`)); if (!y) break; got.push(y); } p[1] = got; }
+    if (x.k === 'xMana') { const mx = l15XMax(act, c, ME); const v = __R(ME, G, await askNumber(`${D(c).name}: elige X`, mx, mx)); if (v == null) return null; p[1] = Math.max(0, Math.min(mx, v | 0)); }
+    if (x.k === 'sacSelfLegArt') { const lst = permsOf(ME).filter(y => y !== c && isType(y, 'artifact') && /\blegendary\b/i.test(D(y).type_line || '')); const y = lst.length === 1 ? lst[0] : __R(ME, G, await pickFromList(lst, 'Elige el artefacto legendario que sacrificas')); if (!y) return null; p[1] = [y]; }
+  }
+  return plan;
+}; }
+{ const _ap = x26XcApply; x26XcApply = function (plan, act, c, s) { const r = _ap.apply(this, arguments); for (const [x, ys] of plan) if (['tapX', 'xMana', 'rmKind', 'sacSelfLegArt', 'bounceSelf'].includes(x.k)) l15XcDo(x, ys, c, s, r, act); return r; }; }
+// sacrificing ~ itself as part of «sacrifice ~ and a legendary artifact»
+{ const _ap2 = x26XcApply; x26XcApply = function (plan, act, c, s) { const r = _ap2.apply(this, arguments); if ((act.xc || []).some(x => x.k === 'sacSelfLegArt') && c.zone === 'bf') sacrifice(c); return r; }; }
+{ const _pb2 = x26XcPayBot; x26XcPayBot = function (act, c, s) { const r = _pb2.apply(this, arguments); if ((act.xc || []).some(x => x.k === 'sacSelfLegArt') && c.zone === 'bf') sacrifice(c); return r; }; }
+// a line with {X} in its cost: read without the {X} and remember how many times X is paid
+const L15_XOPS = new Set(['l15TokX', 'l15DigX']);
+function l15XAct(l, raw) {
+  const m = l.match(/^((?:\{[^}]+\})+)((?:, [^:]+)?):\s*(.+)$/); if (!m || !/\{x\}/.test(m[1])) return null;
+  const mul = (m[1].match(/\{x\}/g) || []).length; const rest = m[1].replace(/\{x\}/g, '') || '{0}';
+  let eff = m[3]; let noCre = false, myTurn = false;
+  if (/\s*activate only if you control no creatures and only during your turn\.?$/.test(eff)) { eff = eff.replace(/\s*activate only if you control no creatures and only during your turn\.?$/, ''); noCre = true; myTurn = true; }
+  if (/\bactivate only\b/.test(eff)) return null;
+  const act = parseAct(`${rest}${m[2]}: ${eff}`, raw || l); if (!act || !act.ops.length || !act.ops.every(o => L15_XOPS.has(o.k))) return null;
+  act.xc = (act.xc || []).concat([{ k: 'xMana', mul }]); act.l15xMul = mul; act.x26c = Object.assign({}, act.x26c || {}, myTurn ? { myTurn: true } : {}); act.x26key = act.x26key || ++X26_ACTKEY; act.text = raw || l; if (noCre) act.l15NoCre = true;
+  return act;
+}
+// channel with X (Shigeki)
+{ const _uc15 = userChannel; userChannel = async function (c) {
+  const ch = abOf(D(c)).channel; if (!ch || !ch.l15x || UI.busy || c.zone !== 'hand') return _uc15.apply(this, arguments);
+  let mx = 0; while (mx < 20 && solve(ME, { generic: ch.generic + (mx + 1) * ch.l15x, pips: ch.pips })) mx++;
+  const v = __R(ME, G, await askNumber(`${D(c).name}: elige X`, mx, mx)); if (v == null) return; const X = Math.max(0, v | 0);
+  pushUndo(); const sol = solve(ME, { generic: ch.generic + X * ch.l15x, pips: ch.pips }); if (sol) pay(ME, sol);
+  moveCard(c, 'gy'); log(`Canalizas ${cn(c)} (X = ${X}).`);
+  const n0 = UI.prompts.length; userOps(ch.ops, { seat: ME, src: c, amount: X }, c); sba(); render();
+  UI.busy = true; try { __R(ME, G, await resolveNewPrompts(n0)); } finally { UI.busy = false; sba(); render(); }
+}; }
+
+/* ---------- escalate (Collective Effort): tap an untapped creature for each mode beyond the first ---------- */
+{ const _pm15 = pickModes; pickModes = async function (md, title) {
+  const ms = __R(ME, G, await _pm15.apply(this, arguments));
+  if (!ms || !md || !md.l15Esc || ms.length < 2) return ms;
+  const free = permsOf(ME).filter(c => isCreature(c) && !c.tapped); const need = ms.length - 1;
+  if (free.length < need) { toast(`Necesitas girar ${need} criaturas para elegir ${ms.length} modos: se queda${free.length + 1 > 1 ? 'n' : ''} ${free.length + 1}.`); ms.length = free.length + 1; }
+  const got = []; for (let i = 0; i < ms.length - 1; i++) { const rest = free.filter(q => !got.includes(q)); const y = rest.length === 1 ? rest[0] : __R(ME, G, await pickFromList(rest, `Escalada: gira una criatura (${i + 1} de ${ms.length - 1})`)); if (!y) { ms.length = i + 1; break; } got.push(y); }
+  got.forEach(tapPerm); if (got.length) log(`Giras ${got.map(cn).join(', ')} para la escalada.`);
+  return ms;
+}; }
+{ const _bmo15 = botModes; botModes = function (s, card, phase, md) {
+  const ms = _bmo15.apply(this, arguments);
+  try { if (md && md.l15Esc && ms && ms.length > 1) { const free = permsOf(s).filter(c => isCreature(c) && !c.tapped && c.atk == null).sort((a, b) => value(a) - value(b)); const n = Math.min(ms.length - 1, free.length); ms.length = n + 1; free.slice(0, n).forEach(tapPerm); if (n) log(`${pn(s)} gira ${free.slice(0, n).map(cn).join(', ')} para la escalada.`); } } catch (e) { console.error(e); }
+  return ms;
+}; }
+
+/* ---------- Miracle: the first card you draw each turn ---------- */
+{ const _dc15 = drawCards; drawCards = function (s, n = 1, silent) {
+  const p = G && G.p[s]; const before = p ? (p.drawT === G.turnsTaken ? (p.drawN || 0) : 0) : 0; const h0 = p ? p.hand.slice() : [];
+  const r = _dc15.apply(this, arguments);
+  try {
+    if (p && before === 0 && r > 0) {
+      const id = p.hand.find(x => !h0.includes(x)); const c = id != null ? G.cards[id] : null;
+      if (c && abOf(D(c)).l15Miracle) (G.l15Mir ||= []).push({ s, id: c.id, t: G.turnsTaken });
+      if (c) for (const x of permsOf(s)) if (AB(x).l15Eisen) (G.l15Eis ||= []).push({ s, id: c.id, t: G.turnsTaken, src: x.id });
+    }
+  } catch (e) { console.error(e); }
+  return r;
+}; }
+async function l15Pending() {
+  if (!G || G.over) return;
+  const mir = (G.l15Mir || []).splice(0); const eis = (G.l15Eis || []).splice(0);
+  for (const e of eis) {
+    const c = G.cards[e.id], x = G.cards[e.src]; if (!c || c.zone !== 'hand' || !x || x.zone !== 'bf' || e.t !== G.turnsTaken) continue;
+    const is = /\b(instant|sorcery)\b/i.test(D(c).type_line || '');
+    let rev = isBotSeat(e.s) ? is : __R(ME, G, await asSeat(e.s, () => askYesNo(`${D(x).name}: ¿revelas ${D(c).name}, la primera carta que has robado este turno?`, is ? 'Es un instantáneo o un conjuro: crearías a Cherubael, ficha 4/4 voladora.' : 'No es un instantáneo ni un conjuro.')));
+    if (!rev) continue; log(`${pn(e.s)} revela ${cn(c)} (${cn(x)}).`);
+    if (is && !tokenCap(e.s)) { makeToken(e.s, { name: 'Cherubael', p: 4, t: 4, colors: ['B'], kws: ['flying'], type: 'Token Legendary Creature — Demon' }); log(`${pn(e.s)} crea a Cherubael, ficha legendaria 4/4 voladora.`); }
+  }
+  for (const e of mir) {
+    const c = G.cards[e.id]; if (!c || c.zone !== 'hand' || e.t !== G.turnsTaken || !alive(e.s)) continue;
+    const mc = abOf(D(c)).l15Miracle; const s = e.s;
+    const costX = x => ({ generic: mc.generic + x * mc.x, pips: mc.pips });
+    let X = 0; if (mc.x) { while (X < 20 && solve(s, costX(X + 1))) X++; }
+    if (!solve(s, costX(mc.x ? Math.min(X, 0) : 0))) { log(`${pn(s)} roba ${cn(c)} (milagro), pero no puede pagar ${esc(mc.text)}.`); continue; }
+    let ok;
+    if (isBotSeat(s)) ok = (isPermDef(D(c)) || l15Score(s, c) > 0) && (!mc.x || X >= 1);
+    else ok = __R(ME, G, await asSeat(s, () => askYesNo(`Milagro: ¿lanzas ${D(c).name} por ${mc.text}?`, 'Es la primera carta que robas este turno. Si no, se queda en tu mano.')));
+    if (!ok) continue;
+    if (mc.x && !isBotSeat(s)) { const v = __R(ME, G, await asSeat(s, () => askNumber(`${D(c).name}: elige X`, X, X))); if (v == null) continue; X = Math.max(0, Math.min(X, v | 0)); }
+    const sol = solve(s, costX(X)); if (!sol) continue; pay(s, sol);
+    c.xVal = X; c.kicked = false; log(`${pn(s)} revela ${cn(c)} y lo lanza por su coste de milagro ${esc(mc.text)}${mc.x ? ` (X = ${X})` : ''}.`, 't');
+    if (isBotSeat(s)) __R(ME, G, await castSpell(s, c, { free: true }));
+    else __R(ME, G, await asSeat(s, async () => { const n0 = UI.prompts.length; __R(ME, G, await castSpell(s, c, { free: true })); __R(ME, G, await resolveNewPrompts(n0)); }));
+    c.xVal = 0; sba();
+  }
+}
+{ const _fp15 = flushPendingCasts; flushPendingCasts = async function () { __R(ME, G, await l15Pending()); return _fp15.apply(this, arguments); }; }
+{ const _mp15 = mainPhaseTriggers; mainPhaseTriggers = async function (s) { const r = __R(ME, G, await _mp15.apply(this, arguments)); __R(ME, G, await l15Pending()); return r; }; }
+
+/* ---------- Rooms: once the second door is unlocked the card has the text of both doors ---------- */
+{ const _fs15 = fromScry; fromScry = function (c, noImg) {
+  const d = _fs15.apply(this, arguments);
+  try { if (c && c.card_faces && c.card_faces[1] && c.layout === 'split' && /\broom\b/i.test(c.card_faces[0].type_line || '')) d.l15Door2 = { name: c.card_faces[1].name, cost: c.card_faces[1].mana_cost || '', text: (c.card_faces[1].oracle_text || '').replace(/\([^)]*\)/g, '').trim(), front: (c.card_faces[0].oracle_text || '').replace(/\([^)]*\)/g, '').trim() }; } catch (e) { console.error(e); }
+  return d;
+}; }
+function l15DoorDef(d) {
+  const dd = d && d.l15Door2; if (!dd) return null;
+  const name = `${d.name} // ${dd.name}`; if (G && G.defs && G.defs[name]) return G.defs[name];
+  const back = dd.text.split('\n').map(x => x.trim()).filter(Boolean).map(x => /^when you unlock this door,/i.test(x) ? 'Door2 unlocked — ' + x : x).join('\n');
+  const nd = mkDef({ name, mana_cost: d.mana_cost, cmc: (d.cmc || 0) + parseCost(dd.cost).generic + parseCost(dd.cost).pips.length, type_line: d.type_line, oracle_text: [dd.front, back].filter(Boolean).join('\n'), power: d.power, toughness: d.toughness, colors: d.colors, ci: d.ci, kw: [], img: d.img, imgL: d.imgL });
+  if (G && G.defs) G.defs[name] = nd; return nd;
+}
+const L15_DOOR_OK = new WeakSet();
+{ const _ab15 = abOf; abOf = function (d) {
+  const a = _ab15.apply(this, arguments);
+  try {
+    if (a && a !== EMPTY_AB && d && d.l15Door2 && !L15_DOOR_OK.has(a)) {
+      L15_DOOR_OK.add(a);
+      const full = l15DoorDef(d); const fa = full ? _ab15(full) : null;
+      if (fa && !fa.unparsed.length && !fa.manual.length && !(fa.emptyOps || []).length) { a.manual = a.manual.filter(x => !/^Puerta /.test(x)); a.l15DoorOk = true; }
+    }
+  } catch (e) { console.error(e); }
+  return a;
+}; }
+{ const _ul15 = XOPS.fxUnlock; XOPS.fxUnlock = function (op, ctx) {
+  const r = _ul15.apply(this, arguments);
+  try {
+    const c = ctx.src && G.cards[ctx.src.id]; if (!c || c.zone !== 'bf') return r;
+    const d = D(c); if (d.l15Door2 && abOf(d).l15DoorOk) { const nd = l15DoorDef(d); if (nd) { c.n = nd.name; recomputeMods(); const ab = AB(c); if (ab.l15Unlock2 && ab.l15Unlock2.length) trigger(c, ab.l15Unlock2); } }
+    for (const x of permsOf(c.ctl)) if (AB(x).l15FullUnlock) trigger(x, AB(x).l15FullUnlock);
+  } catch (e) { console.error(e); }
+  return r;
+}; }
+{ const _acu15 = actCost; actCost = function (act, s, x) { const r = _acu15.apply(this, arguments); try { if (r && act && act.ops && act.ops[0] && act.ops[0].k === 'fxUnlock') { const n = permsOf(s).reduce((q, y) => q + (AB(y).l15UnlockLess || 0), 0); if (n) r.generic = Math.max(0, r.generic - n); } } catch (e) { console.error(e); } return r; }; }
+
+/* ---------- foretell: from the menu of a card in your hand ---------- */
+{ const _cm15 = cardMenu; cardMenu = function (c, x, y, anchor) { G && (G.l15Menu = c); try { return _cm15.apply(this, arguments); } finally { if (G) G.l15Menu = null; } }; }
+{ const _om15 = openMenu; openMenu = function (x, y, head, items, anchor) {
+  try {
+    const c = G && G.l15Menu; const fo = c && c.zone === 'hand' && c.owner === ME && abOf(D(c)).l15Foretell;
+    if (fo && Array.isArray(items)) items.unshift({ label: `Presagiar (pagar {2} y exiliarla boca abajo; luego la lanzas por ${fo.text})`, fn: () => l15Foretell(c) });
+  } catch (e) { console.error(e); }
+  return _om15.apply(this, arguments);
+}; }
+function l15Foretell(c) {
+  closeMenu(); if (!G || UI.busy || c.zone !== 'hand') return;
+  if (G.active !== ME) { toast('Solo puedes presagiar durante tu turno.'); return; }
+  const sol = solve(ME, { generic: 2, pips: [] }); if (!sol) { toast('Necesitas {2} para presagiar.'); return; }
+  pushUndo(); pay(ME, sol); l15ForetellDo(ME, c); render();
+}
+function l15ForetellDo(s, c) { const fo = abOf(D(c)).l15Foretell; moveCard(c, 'exile'); (G.p[s].impulse ||= []).push({ ids: [c.id], left: 9999, alt: { generic: fo.generic, pips: fo.pips }, src: 'Presagio', l15Fore: G.turnsTaken }); log(`${pn(s)} presagia una carta (la exilia boca abajo).`); }
+{ const _ic15b = impulseCards; impulseCards = function (s) { const r = _ic15b.apply(this, arguments); try { return r.filter(c => { const g = (G.p[s].impulse || []).find(q => q.ids.includes(c.id)); return !(g && g.l15Fore === G.turnsTaken); }); } catch (e) { return r; } }; }
+
+/* ---------- other wiring ---------- */
+// Lo and Li: Lesson spells you control have lifelink
+{ const _ll15 = lifelink; lifelink = function (src, n) {
+  const r = _ll15.apply(this, arguments);
+  try { if (G && src && n > 0 && !hasKw(src, 'lifelink') && /\b(instant|sorcery)\b/i.test(D(src).type_line || '') && /\blesson\b/i.test(D(src).type_line || '')) { const s = src.castBy != null ? src.castBy : src.owner; if (s != null && permsOf(s).some(x => AB(x).l15LessonLL) && gainLife(s, n)) log(`${pn(s)} gana ${n} vida${n > 1 ? 's' : ''} por vínculo vital (${cn(src)}).`, 'good'); } } catch (e) { console.error(e); }
+  return r;
+}; }
+// protection: from mana value 3 or less (Reaver Titan), from everything for your commanders (Vexilus Praetor)
+function l15ProtFrom(c, src) {
+  if (!G || !c || c.zone !== 'bf' || !src) return false;
+  if (AB(c).l15ProtMv != null && l15Mv(src) <= AB(c).l15ProtMv) return true;
+  if (c.isCmd && permsOf(c.ctl).some(x => AB(x).l15ProtCmd)) return true;
+  return false;
+}
+{ const _ao15 = applyOp; applyOp = function (op, ctx, t) { if (t && t.zone === 'bf' && ctx && ctx.src && needsTarget(op) && l15ProtFrom(t, G.cards[ctx.src.id] || ctx.src) && (G.cards[ctx.src.id] || ctx.src) !== t) { log(`${cn(t)} tiene protección: el efecto no le afecta.`); return; } return _ao15.apply(this, arguments); }; }
+{ const _dd15 = dealDamage; dealDamage = function (c, n, src) { if (c && src && n > 0 && l15ProtFrom(c, src)) { log(`Se previene el daño a ${cn(c)} (protección).`); return 0; } const r = _dd15.apply(this, arguments); try { if (G && c && src && n > 0 && AB(c).l15Rona) { const o = src.ctl != null ? src.ctl : src.owner; if (o != null && alive(o)) setTimeout0(() => trigger(c, [{ k: 'l15Rona', o }])); } } catch (e) { console.error(e); } return r; }; }
+{ const _cb15 = canBlock; canBlock = function (b, a) { if (a && b && l15ProtFrom(a, b)) return false; return _cb15.apply(this, arguments); }; }
+{ const _at15 = attachTo; attachTo = function (x, h) { if (x && h && l15ProtFrom(h, x)) { log(`${cn(h)} tiene protección: ${cn(x)} no se le puede anexar.`); return; } return _at15.apply(this, arguments); }; }
+// Great Divide Guide: each land and Ally you control has «{T}: add one mana of any color»
+{ const _mo15 = manaOf; manaOf = function (c) {
+  const m = _mo15.apply(this, arguments);
+  try {
+    if (!G || !c || c.zone !== 'bf' || !(isLand(c) || l14IsType(c, 'ally')) || !permsOf(c.ctl).some(x => AB(x).l15Guide)) return m;
+    if (!m) return { cols: ['ANY'], amt: 1, sac: false };
+    if ((m.amt || 1) === 1 && !m.sac && !m.forEach && !m.ctrSpend && !m.autogen && !m.depl && !m.onlyCre && !m.onlyIS && !m.cols.includes('ANY')) return Object.assign({}, m, { cols: ['ANY'] });
+  } catch (e) { console.error(e); }
+  return m;
+}; }
+// Bootleggers' Stash: lands you control have «{T}: create a Treasure token»
+const L15_STASH = { generic: 0, pips: [], tap: true, sac: false, sacOther: null, life: 0, ops: [{ k: 'treasure', n: 1 }], cond: {}, text: "{T}: Create a Treasure token. (Bootleggers' Stash)", rmCtr: null, discard: 0 };
+{ const _ga15 = grantedActs; grantedActs = function (c) { const out = _ga15.apply(this, arguments); try { if (G && c && c.zone === 'bf' && isLand(c) && permsOf(c.ctl).some(x => AB(x).l15Stash)) return out.concat([L15_STASH]); } catch (e) { console.error(e); } return out; }; }
+// Doc Aurlock: spells cast from the graveyard or exile cost {2} less
+{ const _fc15b = fullCost; fullCost = function (c, s) { const r = _fc15b.apply(this, arguments); try { if (r && G && c && (c.zone === 'gy' || c.zone === 'exile') && s != null) { const n = permsOf(s).reduce((q, x) => q + (AB(x).l15DocLess || 0), 0); if (n) r.generic = Math.max(0, r.generic - n); } } catch (e) { console.error(e); } return r; }; }
+// Bruenor Battlehammer: the first equip ability each turn costs {0}
+{ const _ec15 = equipCost; equipCost = function (e, s) { const r = _ec15.apply(this, arguments); try { if (r && G && s != null && G.p[s] && G.p[s].l15EqT !== G.turnsTaken && permsOf(s).some(x => AB(x).l15FreeEquip)) return Object.assign({}, r, { generic: 0, pips: [] }); } catch (e2) { console.error(e2); } return r; }; }
+// energy: Izzet Generatorium (one more each time) and energy paid this turn
+{ const _ap15 = addPCtr; addPCtr = function (s, type, n, by) { try { if (G && type === 'energy' && n > 0) { const k = permsOf(s).filter(x => AB(x).l15Gener).length; if (k) { n += k; log(`Izzet Generatorium: ${pn(s)} obtiene ${k} de energía más.`); } } } catch (e) { console.error(e); } return _ap15.call(this, s, type, n, by); }; }
+{ const _pe15e = l14PayE; l14PayE = function (s, n) { const r = _pe15e.apply(this, arguments); try { if (r) { const p = G.p[s]; if (p.l15ET !== G.turnsTaken) { p.l15ET = G.turnsTaken; p.l15EN = 0; } p.l15EN += n; } } catch (e) { console.error(e); } return r; }; }
+// damage dealt to each player this turn (Spinerock Knoll); first life loss of an opponent during their turn (Valgavoth); speed
+{ const _dp15 = damagePlayer; damagePlayer = function (s, n, src) { const p = G && G.p[s]; const l0 = p ? p.life : 0; const r = _dp15.apply(this, arguments); try { if (p && l0 > p.life) { if (p.l15DT !== G.turnsTaken) { p.l15DT = G.turnsTaken; p.l15DN = 0; } p.l15DN += l0 - p.life; } } catch (e) { console.error(e); } return r; }; }
+{ const _ll15b = loseLife; loseLife = function (s, n) {
+  const p = G && G.p[s]; const lost0 = p ? (p.lostTurn || 0) : 0; const life0 = p ? p.life : 0;
+  const r = _ll15b.apply(this, arguments);
+  try {
+    if (p && p.life < life0) {
+      if (lost0 === 0 && G.active === s) for (const x of permsAll()) if (x.ctl !== s && AB(x).l15Valg) trigger(x, [{ k: 'selfCounters', n: 1 }, { k: 'draw', n: 1 }]);
+      const a = G.active; if (a !== s && alive(a) && permsOf(a).some(x => AB(x).l15Engines)) { const pc = pctr(G.p[a]); if (G.p[a].l15SpT !== G.turnsTaken && (pc.speed || 0) < 4) { G.p[a].l15SpT = G.turnsTaken; pc.speed = Math.max(1, pc.speed || 0) + 1; if (pc.speed > 4) pc.speed = 4; log(`${pn(a)} acelera: velocidad ${pc.speed}${pc.speed >= 4 ? ' (máxima)' : ''}.`); } }
+    }
+  } catch (e) { console.error(e); }
+  return r;
+}; }
+// start your engines!: you start at speed 1
+{ const _oe15b = onEnter; onEnter = function (c) { const r = _oe15b.apply(this, arguments); try { if (G && c && c.zone === 'bf' && AB(c).l15Engines) { const pc = pctr(G.p[c.ctl]); if (!(pc.speed > 0)) { pc.speed = 1; log(`${pn(c.ctl)} arranca motores: velocidad 1.`); } } } catch (e) { console.error(e); } return r; }; }
+// crimes: targeting an opponent, something they control or a card in their graveyard (Bandit's Haul)
+{ const _ao15b = applyOp; applyOp = function (op, ctx, t) {
+  try {
+    if (G && t && ctx && ctx.seat != null && needsTarget(op)) {
+      const s = ctx.seat; const who = t.pl != null ? t.pl : t.zone === 'bf' ? t.ctl : t.zone === 'gy' ? t.owner : null;
+      if (who != null && who !== s && oppsOf(s).includes(who)) for (const x of permsOf(s)) if (AB(x).l15Crime && x26TurnOnce(x, 'crime')) { x.cnt.loot = (x.cnt.loot || 0) + 1; log(`${pn(s)} comete un crimen: ${cn(x)} recibe un contador de botín (${x.cnt.loot}).`); }
+    }
+  } catch (e) { console.error(e); }
+  return _ao15b.apply(this, arguments);
+}; }
+// combat damage of artifact creatures (Pia Nalaar) and of your creatures (Locker Room)
+{ const _cd15 = combatDamage; combatDamage = function (attacks) {
+  const hit0 = []; const life0 = G ? G.p.map(p => p.life) : [];
+  const r = _cd15.apply(this, arguments);
+  try {
+    const seats = new Map();
+    for (const a of attacks || []) { const c = G.cards[a.id]; if (!c || typeof a.to !== 'number' || !G.p[a.to] || life0[a.to] <= G.p[a.to].life) continue; const sd = seats.get(c.ctl) || { art: false, any: false }; sd.any = true; if (isCreature(c) && isType(c, 'artifact')) sd.art = true; seats.set(c.ctl, sd); }
+    for (const [s, sd] of seats) for (const x of permsOf(s)) { const a = AB(x); if (sd.art && a.l15PiaE) trigger(x, [{ k: 'pctr', type: 'energy', n: 2, who: 'you' }]); if (sd.any && a.l15AnyCreDmg) trigger(x, [{ k: 'draw', n: 1 }]); }
+  } catch (e) { console.error(e); }
+  void hit0; return r;
+}; }
+// Launch the Fleet: «whenever this creature attacks, create a 1/1 Soldier tapped and attacking»; Redemptor Dreadnought
+{ const _fa15 = fxAttackers; fxAttackers = function (s, attacks, byDef) {
+  const r = _fa15.apply(this, arguments);
+  try { for (const a of attacks) { const c = G.cards[a.id]; if (c && c.zone === 'bf' && c.l15FleetT === G.turnsTaken) trigger(c, [{ k: 'l14AtkTok', spec: { name: 'Soldier', p: 1, t: 1, colors: ['W'], type: 'Token Creature — Soldier' }, to: a.to }]); } } catch (e) { console.error(e); }
+  return r;
+}; }
+// each upkeep: Aang transforms; Portent's delayed draw; the cleanup of «becomes an Avatar until end of turn»; stun counters that can't be removed
+{ const _bt15 = beginTurn; beginTurn = function (s) {
+  const keep = []; try { if (G) for (const c of permsOf(s)) if ((c.cnt.stun || 0) > 0 && c.tapped && permsAll().some(x => x.ctl !== s && AB(x).l15StunLock)) keep.push([c, c.cnt.stun]); } catch (e) { console.error(e); }
+  const r = _bt15.apply(this, arguments);
+  try {
+    for (const [c, n] of keep) if (c.zone === 'bf') { c.tapped = true; c.cnt.stun = n; log(`${cn(c)} no se endereza: sus contadores de aturdimiento no se pueden quitar.`); }
+    for (const c of permsAll()) { if (c.l15AddT != null && c.l15AddT < G.turnsTaken) { c.l15AddT = null; c.addTypes = (c.addTypes || []).filter(t => t !== c.l15AddType); c.l15AddType = null; } }
+    for (const c of permsAll()) if (c.l15TfUp) { c.l15TfUp = false; if (D(c).back || c.front == null) { log(`${cn(c)} se transforma al principio del mantenimiento.`); tfInPlace(c); } }
+    const pd = (G.l15Portent || []).filter(x => x.t < G.turnsTaken); G.l15Portent = (G.l15Portent || []).filter(x => x.t >= G.turnsTaken);
+    for (const x of pd) if (alive(x.s)) { drawCards(x.s, 1); log(`${pn(x.s)} roba una carta (Portent).`); }
+  } catch (e) { console.error(e); }
+  return r;
+}; }
+
+/* ---------- lines ---------- */
+function l15Line(a, l, PE) {
+  let m; const t = l.replace(/\s+([.,])/g, '$1').replace(/\s{2,}/g, ' ').replace(/\.$/, '').trim();
+  const flag = (k, v = true) => { a[k] = v; return x26Trig(a, { ev: 'l15flag' }); };
+  if ((m = t.match(/^waterbend \{(\d+)\}: (.+)$/))) { const ops = PE(m[2]); if (!ops.length) return false; a.acts.push({ generic: +m[1], pips: [], tap: false, sac: false, sacOther: null, life: 0, ops, cond: {}, text: l, wb: +m[1], rmCtr: null, discard: 0 }); return true; }
+  if ((m = t.match(/^when ~ is put into your graveyard from the battlefield, (.+)$/)) && /\bcreature\b/.test(L15_TL.v)) { const ops = PE(m[1]); if (!ops.length) return false; a.dies.push(...ops); return true; }
+  if ((m = t.match(/^squad \{(\d+)\}$/))) { a.multikicker = +m[1]; a.multikickerPips = []; a.multikickerText = `SQUAD {${m[1]}}`; return flag('l15Squad'); }
+  if (/^strive — this spell costs \{1\} more to cast for each target beyond the first$/.test(t)) { a.multikicker = 1; a.multikickerPips = []; a.multikickerText = 'STRIVE {1} (cada objetivo extra)'; return flag('l15Strive'); }
+  if (/^escalate—tap an untapped creature you control$/.test(t)) return flag('l15Esc');
+  if ((m = t.match(/^as an additional cost to cast this spell, you may waterbend \{(\d+)\}$/))) { a.kicker = { generic: +m[1], pips: [], text: `WATERBEND {${m[1]}}`, l15wb: +m[1] }; return true; }
+  if (/^(?:[a-z' ]+ — )?as an additional cost to cast this spell, you may exile a creature card from your graveyard$/.test(t)) return flag('l15Dread');
+  if ((m = t.match(/^miracle ((?:\{[^}]+\})+)$/))) { const pc = parseCost(m[1]); return flag('l15Miracle', { generic: pc.generic, pips: pc.pips, x: pc.x, text: m[1].toUpperCase() }); }
+  if ((m = t.match(/^foretell ((?:\{[^}]+\})+)$/))) { const pc = parseCost(m[1]); return flag('l15Foretell', { generic: pc.generic, pips: pc.pips, text: m[1].toUpperCase() }); }
+  if ((m = t.match(/^you may cast ([a-z]+) spells from the top of your library$/)) && m[1] !== 'creature') return flag('l15TopSub', m[1]);
+  if (/^you may play lands and cast spells from the top of your library$/.test(t)) { a.topLands = true; return flag('l15TopAll'); }
+  if (/^once during each of your turns, you may cast a spell from your hand or the top of your library without paying its mana cost$/.test(t)) return flag('l15FreeOnce');
+  if (/^once during each of your turns, you may cast an enchantment spell by paying life equal to its mana value rather than paying its mana cost$/.test(t)) return flag('l15LifeEnch');
+  if (/^once during each of your turns, you may cast a spell from your hand by paying life equal to its mana value rather than paying its mana cost$/.test(t)) return flag('l15LifeAny');
+  if (/^you may pay eight \{e\} rather than pay the mana cost for permanent spells you cast$/.test(t)) return flag('l15NissaE');
+  if (/^you may cast the first creature spell you cast each turn as though it had flash$/.test(t)) return flag('fxRadagast');
+  if (/^you may cast this spell as though it had flash if you control an attacking legendary creature$/.test(t)) return flag('l15FlashLegAtk');
+  if (/^you may cast this spell as though it had flash if it targets a commander$/.test(t)) return flag('l15FlashCmd');
+  if (/^during your turn, you may cast cards exiled with ~ and you may cast them as though they had flash\. mana of any type can be spent to cast those spells$/.test(t)) return flag('l15AzulaOk');
+  if (/^once each turn, you may cast a spell with mana value less than or equal to the number of elves and faeries you control from among cards exiled with ~ this turn without paying its mana cost$/.test(t)) return flag('l15MaralenOk');
+  if (/^each land and ally you control has "\{t\}: add one mana of any color\.?"$/.test(t)) return flag('l15Guide');
+  if (/^lands you control have "\{t\}: create a treasure token\.?"$/.test(t)) return flag('l15Stash');
+  if (/^noble creatures you control and lesson spells you control have lifelink$/.test(t)) { a.anthems.push({ p: 0, t: 0, other: false, f: 'noble', kw: ['lifelink'] }); a.l15LessonLL = true; return true; }
+  if (/^(?:[a-z' ]+ — )?commanders you control have protection from everything$/.test(t)) return flag('l15ProtCmd');
+  if ((m = t.match(/^(?:[a-z' ]+ — )?protection from mana value (\d+) or less$/))) return flag('l15ProtMv', +m[1]);
+  if (/^each creature you control gets \+2\/\+0 for each equipment attached to it$/.test(t)) return flag('l15Bruenor');
+  if (/^you may pay \{0\} rather than pay the equip cost of the first equip ability you activate each turn$/.test(t)) { x26Trig(a, { ev: 'activate', who: 'you', run: (x, info) => { if (info.c && isType(info.c, 'equipment')) G.p[x.ctl].l15EqT = G.turnsTaken; } }); return flag('l15FreeEquip'); }
+  if (/^~ enters with a \+1\/\+1 counter on it for each creature card in your graveyard$/.test(t)) return flag('l15EntersPerGy');
+  if (/^spells you cast from your graveyard or from exile cost \{2\} less to cast$/.test(t)) return flag('l15DocLess', 2);
+  if (/^plotting cards from your hand costs \{2\} less$/.test(t)) { a.manual.push('Plot: cuesta {2} menos; el plot se hace a mano en esta app.'); return true; }
+  if (/^start your engines!$/.test(t)) return flag('l15Engines');
+  if ((m = t.match(/^max speed — (.+)$/))) { const act = parseAct(m[1], l); if (!act) return false; act.l15MaxSpeed = true; a.acts.push(act); return true; }
+  if (/^stun counters can't be removed from permanents your opponents control$/.test(t)) return flag('l15StunLock');
+  if (/^unlock costs you pay cost \{1\} less$/.test(t)) return flag('l15UnlockLess', 1);
+  if ((m = t.match(/^(?:eerie — )?whenever ~ or another enchantment you control enters and whenever you fully unlock a room, (.+)$/))) { const ops = PE(m[1]); if (!ops.length) return false; a.l15FullUnlock = ops; return x26Trig(a, { ev: 'enter', who: 'you', types: ['enchantment'], self: true, ops }); }
+  if ((m = t.match(/^door2 unlocked — when you unlock this door, (.+)$/))) { const ops = PE(m[1]); if (!ops.length) return false; a.l15Unlock2 = ops; return x26Trig(a, { ev: 'l15flag' }); }
+  if ((m = t.match(/^when you unlock this door, (.+)$/))) { const ops = PE(m[1]); if (!ops.length) return false; a.l15Unlock1 = ops; return x26Trig(a, { ev: 'l15flag' }); }
+  if (/^whenever one or more creatures you control deal combat damage to a player, draw a card$/.test(t)) return flag('l15AnyCreDmg');
+  if (/^whenever one or more artifact creatures you control deal combat damage to a player, you get \{e\}\{e\}$/.test(t)) return flag('l15PiaE');
+  if (/^if you would get one or more \{e\}, you get that many plus one \{e\} instead$/.test(t)) return flag('l15Gener');
+  if (/^\{t\}: draw a card\. activate only if you've paid or lost four or more \{e\} this turn$/.test(t)) { a.acts.push(x26PlainAct({ tap: true, ops: [{ k: 'draw', n: 1 }], x26c: {}, x26key: ++X26_ACTKEY, l15E4: true, text: l })); return true; }
+  if (/^whenever you commit a crime, put a loot counter on ~\. this ability triggers only once each turn$/.test(t)) return flag('l15Crime');
+  if (/^whenever an opponent loses life for the first time during each of their turns, put a \+1\/\+1 counter on ~ and draw a card$/.test(t)) return flag('l15Valg');
+  if (/^whenever a player casts their first spell each turn, choose another target player\. ~ deals damage equal to that spell's mana value to the chosen player$/.test(t)) return x26Trig(a, { ev: 'cast', nthCast: 1, run: (x, info) => { if (info.c) trigger(x, [{ k: 'l15Pain', n: l15Mv(info.c), caster: info.s }]); } });
+  if (/^when another creature you control leaves the battlefield, transform ~ at the beginning of the next upkeep$/.test(t)) return x26Trig(a, { ev: 'x26leave', who: 'you', run: (x, info) => { if (info.c && info.c.id !== x.id && info.wasCre && x.zone === 'bf') x.l15TfUp = true; } });
+  if (/^whenever a permanent you control is put into a graveyard, you get \{e\}$/.test(t)) return x26Trig(a, { ev: 'x26leave', who: 'you', run: (x, info) => { if (info.intended === 'gy') trigger(x, [{ k: 'pctr', type: 'energy', n: 1, who: 'you' }]); } });
+  if (/^you may reveal the first card you draw each turn as you draw it\. whenever you reveal an instant or sorcery card this way, create cherubael, a legendary 4\/4 black demon creature token with flying$/.test(t)) return flag('l15Eisen');
+  if (/^whenever a source deals damage to ~, that source's controller exiles a card from their hand at random\. if it's a land card, you may put it onto the battlefield under your control\. otherwise, you may cast it without paying its mana cost$/.test(t)) return flag('l15Rona');
+  // activated abilities
+  if ((m = t.match(/^waterbend \{(\d+)\}, \{t\}: (.+)$/))) { const ops = PE(m[2]); if (!ops.length) return false; a.acts.push({ generic: +m[1], pips: [], tap: true, sac: false, sacOther: null, life: 0, ops, cond: {}, text: l, wb: +m[1], rmCtr: null, discard: 0 }); return true; }
+  if ((m = t.match(/^channel — ((?:\{[^}]+\})+), discard ~: (.+)$/)) && /\{x\}/.test(m[1])) { const pc = parseCost(m[1]); const ops = PE(m[2]); if (!ops.length) return false; a.channel = { generic: pc.generic, pips: pc.pips, text: m[1].toUpperCase(), ops, less: false, l15x: pc.x }; return true; }
+  { const act = l15XAct(t, l); if (act) { a.acts.push(act); return true; } }
+  return false;
+}
+{ const _el15 = eoeLine; eoeLine = function (a, l, PE) { if (l15Line(a, l, PE)) return true; return _el15(a, l, PE); }; }
+{ const _ab15t = abOf; abOf = function (d) { if (d && d !== EMPTY_AB && !AB_CACHE.has(d)) L15_TL.v = (d.type_line || '').toLowerCase(); try { return _ab15t.apply(this, arguments); } finally { L15_TL.v = ''; } }; }
+const L15_TL = { v: '' };
+{ const _ck15 = x26XcCheck; x26XcCheck = function (act, c, s) { if (act && act.l15E4) { const p = G.p[s]; if (!(p.l15ET === G.turnsTaken && p.l15EN >= 4)) return 'Solo si has pagado o perdido cuatro o más de energía este turno.'; } if (act && act.l15MaxSpeed && !((pctr(G.p[s]).speed || 0) >= 4)) return 'Solo con velocidad máxima (4).'; return _ck15.apply(this, arguments); }; }
+{ const _co15 = actCondOk; actCondOk = function (act, c, s) { const r = _co15.apply(this, arguments); if (r) return r; if (act && (act.l15E4 || act.l15MaxSpeed) && !(act.xc || act.x26c)) return x26XcCheck(act, c, s); return null; }; }
+// escalate: the modal of the card remembers it
+{ const _ab15b = abOf; abOf = function (d) { const a = _ab15b.apply(this, arguments); try { if (a && a.l15Esc && a.modal && !a.modal.l15Esc) a.modal.l15Esc = true; } catch (e) { console.error(e); } return a; }; }
+
+/* ---------- sentences ---------- */
+const L15_TOK = (n, p, t, col, sub, kws) => ({ name: l13Cap(sub), p, t, colors: [col], kws, type: 'Token Creature — ' + l13Cap(sub) });
+function l15Sentence(s0, pe) {
+  let m; const s = s0.replace(/\bthis room\b/g, '~');
+  if ((m = s.match(/^until end of turn, (.+)$/)) && !/until end of turn/.test(m[1])) { const r = l15Sentence(m[1] + ' until end of turn', pe); if (r) return r; }
+  if (/^choose up to one target creature, then airbend all other creatures$/.test(s)) return [{ k: 'l15Wrath', lock: false }];
+  if (/^until your next turn, your opponents can't cast spells from anywhere other than their hands$/.test(s)) return [{ k: 'l15WrathLock' }];
+  if ((m = s.match(/^look at the top (\w+) cards of your library\. you may put an? ([a-z]+) card with mana value (\d+) or less from among them onto the battlefield\. put the rest on the bottom of your library in a random order$/)) && num(m[1]) > 0) return [{ k: 'l15DigBf', n: num(m[1]), f: m[2], mv: +m[3] }];
+  if (/^airbend up to one other target creature or spell$/.test(s)) return [{ k: 'l15AirSpell' }];
+  if (/^exile up to one other target nonland permanent until ~ leaves the battlefield$/.test(s)) return [{ k: 'exile', f: 'nonland permanent', until: true, upTo: true, l8other: true }];
+  if ((m = s.match(/^sacrifice ~\. if you do, (scry \d+|draw a card)$/))) { const ops = pe(m[1]); if (!ops.length) return null; return [{ k: 'l15SacThen', ops }]; }
+  if (/^choose up to one target creature, then airbend all other creatures\. until your next turn, your opponents can't cast spells from anywhere other than their hands$/.test(s)) return [{ k: 'l15Wrath' }];
+  if ((m = s.match(/^target creature you control becomes an? ([a-z]+) in addition to its other types and gains ([a-z ,]+) until end of turn$/))) { const kws = l12KwList(m[2]); if (!kws.length || kws.join(' and ') !== m[2].replace(/,? and |, /g, ' and ')) return null; return [{ k: 'l15AvState', type: l13Cap(m[1]), kws }]; }
+  if (/^draw two cards\. if this spell's additional cost was paid, instead shuffle your graveyard into your library, draw seven cards, and you have no maximum hand size for the rest of the game$/.test(s)) return [{ k: 'l15SWR' }];
+  if (/^starting with you, each player chooses up to one permanent with mana value 3 or greater from among permanents your opponents control\. exile those permanents$/.test(s)) return [{ k: 'l15Yang' }];
+  if (/^you may have target opponent draw three cards\. if you do, draw three cards$/.test(s)) return [{ k: 'l15Yang2' }];
+  if ((m = s.match(/^you may cast an? (noncreature )?spell(?: with mana value x or less)? from your hand without paying its mana cost(?:, where x is the number of attacking creatures)?$/))) return [{ k: 'l15Free', f: m[1] ? 'noncreature' : 'any', mvCnt: /where x is the number of attacking creatures/.test(s) ? 'attackers' : /mana value x or less/.test(s) ? 'x' : null }];
+  if (/^~ deals x damage to any target\. you may cast a spell with mana value x or less from your hand without paying its mana cost$/.test(s)) return [{ k: 'x26Dmg', n: 'x', tg: 'any', harm: true }, { k: 'l15Free', f: 'any', mvCnt: 'x' }];
+  if (/^look at the top six cards of your library\. you may cast a spell from among them without paying its mana cost\. put the rest on the bottom of your library in a random order$/.test(s)) return [{ k: 'l15LookCast', n: 6 }];
+  if (/^exile cards from the top of your library until you exile a nonland card\. you may cast that card without paying its mana cost if the spell's mana value is less than the number of mountains you control\. if you don't cast that card this way, put it into your hand$/.test(s)) return [{ k: 'l15Solstice' }];
+  if ((m = s.match(/^you may play the exiled card without paying its mana cost if an opponent was dealt (\d+) or more damage this turn$/))) return [{ k: 'l15Hidden', opp: +m[1] }];
+  if (/^you may mill three cards\. then if there are twenty or more cards in your graveyard, you may play the exiled card without paying its mana cost$/.test(s)) return [{ k: 'l15Tamper' }];
+  if (/^reveal a card from your hand or the top card of your library\. if you reveal a creature card this way, put it onto the battlefield$/.test(s)) return [{ k: 'l15Eladamri' }];
+  if (/^exile the top two cards of target opponent's library$/.test(s)) return [{ k: 'l15MaralenEx' }];
+  if (/^target opponent exiles a nontoken creature they control, then they exile a nonland card from their graveyard$/.test(s)) return [{ k: 'l15AzulaEx' }];
+  if (/^choose up to two creatures, then destroy the rest$/.test(s)) return [{ k: 'l15KeepTwo' }];
+  if (/^look at the top x cards of your library\. you may reveal an artifact card from among them and put it into your hand\. put the rest on the bottom of your library in a random order$/.test(s)) return [{ k: 'l15DigX', f: 'artifact' }];
+  if (/^return target creature card with mana value x or less from your graveyard to the battlefield, where x is the amount of life you gained this turn$/.test(s)) return [{ k: 'l15Celestine' }];
+  if ((m = s.match(/^create x (\d+)\/(\d+) (white|blue|black|red|green) ([a-z ]+?) creature tokens(?: with ([a-z ]+))?$/))) { const kws = m[5] ? l12KwList(m[5]) : []; if (m[5] && !kws.length) return null; return [{ k: 'l15TokX', spec: L15_TOK(0, +m[1], +m[2], L14_COLS[m[3]], m[4], kws) }]; }
+  if (/^create x treasure tokens$/.test(s)) return [{ k: 'l15TokX', treasure: true }];
+  if (/^nonland permanents your opponents control lose indestructible until end of turn$/.test(s)) return [{ k: 'l15NoInd' }];
+  if (/^destroy all nonland permanents$/.test(s)) return [{ k: 'l15WipeNL' }];
+  if (/^investigate that many times$/.test(s)) return [{ k: 'l15ClueAmt' }];
+  if (/^until end of turn, any number of target creatures each gain "whenever ~ attacks, create a 1\/1 white soldier creature token that's tapped and attacking\.?"$/.test(s)) return [{ k: 'l15Fleet' }];
+  if (/^if a card is exiled with it, it gets \+x\/\+x until end of turn, where x is the power of the exiled card$/.test(s)) return [{ k: 'l15Dread' }];
+  if (/^return all artifact and enchantment cards from your graveyard to the battlefield$/.test(s)) return [{ k: 'l15RetAll', f: ['artifact', 'enchantment'] }];
+  if (/^return all creature cards from your graveyard to the battlefield$/.test(s)) return [{ k: 'l15RetAll', f: ['creature'] }];
+  if (/^return up to one target creature card from your graveyard to the battlefield with a lifelink counter on it$/.test(s)) return [{ k: 'l15ReanCtr', kind: 'lifelink' }];
+  if (/^exile it and the top six cards of your library in a face-down pile\. if you do, shuffle that pile and put it back on top of your library$/.test(s)) return [{ k: 'l15Katherine' }];
+  if ((m = s.match(/^~ deals (\d+) damage to target creature an opponent controls\. you gain life equal to the excess damage dealt this way$/))) return [{ k: 'l15Excess', n: +m[1] }];
+  if ((m = s.match(/^~ deals (\d+) damage to target creature an opponent controls$/))) return [{ k: 'l15Excess', n: +m[1], noGain: true }];
+  if (/^counter target spell\. if you control a wizard, add an amount of \{c\} equal to the amount of mana spent to cast that spell at the beginning of your next main phase$/.test(s)) return [{ k: 'counter', f: '', unless: 0 }, { k: 'l15Sculpt' }];
+  if (/^look at the top three cards of target player's library, then put them back in any order(?:\. you may have that player shuffle)?$/.test(s)) return [{ k: 'l15Portent' }];
+  if (/^you may have that player shuffle$/.test(s)) return [{ k: 'noop' }];
+  if (/^draw a card at the beginning of the next turn's upkeep$/.test(s)) return [{ k: 'l15PortentDraw' }];
+  if (/^for each opponent, choose up to one target artifact or enchantment that player controls\. for each permanent chosen this way, its controller may exile it\. then if one or more of the chosen permanents are still on the battlefield, you search your library for up to that many land cards, put them onto the battlefield tapped, then shuffle$/.test(s)) return [{ k: 'l15Disorient' }];
+  if (/^search your library for up to four land cards with different names and reveal them\. an opponent chooses two of those cards\. put the chosen cards into your graveyard and the rest onto the battlefield tapped, then shuffle$/.test(s)) return [{ k: 'l15Teach' }];
+  if (/^reveal the top four cards of your library\. you may put a land card from among them onto the battlefield tapped\. put the rest into your graveyard$/.test(s)) return [{ k: 'l15Shigeki' }];
+  if (/^return x target nonlegendary cards from your graveyard to your hand$/.test(s)) return [{ k: 'l15RegrowX' }];
+  if (/^mill cards equal to its power\. return ~ to its owner's hand and up to one creature card milled this way to the battlefield under your control$/.test(s)) return [{ k: 'l15Destiny' }];
+  if (/^~ deals damage equal to 2 plus the number of lesson cards in your graveyard to target creature\. if that creature would die this turn, exile it instead$/.test(s)) return [{ k: 'x26Dmg', n: 0, tg: 'cre', harm: true, l15lesson: 2, exileIfDies: true }];
+  if (/^search your library for any number of goblin cards, reveal them, then shuffle and put those cards on top in any order$/.test(s)) return [{ k: 'l15Recruit', f: 'goblin' }];
+  if (/^starting with you, each player may choose an artifact or enchantment you don't control\. destroy each permanent chosen this way$/.test(s)) return [{ k: 'l15Druid' }];
+  if (/^choose target artifact or creature\. you get \{e\}\{e\}\{e\}\{e\}, then you may pay an amount of \{e\} equal to that permanent's mana value\. if you do, gain control of it$/.test(s)) return [{ k: 'l15Coup' }];
+  if (/^you may pay one or more \{e\}\. if you do, create an x\/x colorless vehicle artifact token named nalaar aetherjet with flying and crew 2, where x is the amount of \{e\} paid this way$/.test(s)) return [{ k: 'l15Pia' }];
+  if (/^~ gets \+x\/\+0 until end of turn, where x is the sacrificed enchantment's mana value$/.test(s)) return [{ k: 'l15PumpSacMv' }];
+  if (/^put a \+1\/\+1 counter on each creature target player controls$/.test(s)) return [{ k: 'l15CtrPlayer' }];
+  if (/^one or two target creatures can't block this turn$/.test(s)) return [{ k: 'l14Gambit', n: 2, dmg: 0 }];
+  if ((m = s.match(/^if this spell's additional cost was paid, whenever a creature dies this turn, you gain (\d+) life$/))) return [{ k: 'l15DieGain', n: +m[1] }];
+  if (/^each creature you control gains firebending (\d+) until end of turn$/.test(s)) return null;
+  return null;
+}
+{ const _pe15 = parseEffects; parseEffects = function (s) {
+  if (typeof s !== 'string') return _pe15(s);
+  const t = s.replace(/\s+([.,])/g, '$1').replace(/\s{2,}/g, ' ').trim().replace(/\.$/, '').trim();
+  const w = l15Sentence(t, _pe15); if (w) return w;
+  const r = _pe15(s);
+  const parts = t.split(/\.\s+/).map(p => p.trim()).filter(Boolean);
+  if (parts.length > 1 && parts.some(p => l15Sentence(p, _pe15))) { const out = []; for (const p of parts) { const o = l15Sentence(p, _pe15) || _pe15(p); if (!o.length) return r; out.push(...o); } return out; }
+  return r;
+}; }
+// Combustion Technique: 2 plus the number of Lesson cards in your graveyard
+{ const _dn15 = x26DmgN; x26DmgN = function (op, ctx) { if (op && op.l15lesson != null) return op.l15lesson + G.p[ctx.seat].gy.map(id => G.cards[id]).filter(c => c && /\blesson\b/i.test(D(c).type_line || '')).length; return _dn15.apply(this, arguments); }; }
+
+/* ---------- more lines that need the creature that died ---------- */
+{ const _mc15 = moveCard; moveCard = function (c, to) {
+  let watch = [], died = false;
+  try { if (G && c && c.zone === 'bf' && to !== 'bf') { if (isCreature(c)) { died = true; c._l15P = Math.max(0, P(c)); if (to === 'gy') watch = permsAll().filter(x => x.att === c.id && AB(x).l15DestinyT); } c.l15ExP = 0; } } catch (e) { console.error(e); }
+  const r = _mc15.apply(this, arguments);
+  // «when enchanted creature dies»: the Aura has usually gone to the graveyard already; it still triggers (leaves-the-battlefield abilities look back)
+  try { if (watch.length && c.zone === 'gy' && !c.token) for (const x of watch) trigger(x, [{ k: 'l15Destiny', p: c._l15P || 0 }]); } catch (e) { console.error(e); }
+  try { if (died && to === 'gy') for (const p of G.p) if (p.l15DieGainT === G.turnsTaken && p.l15DieGainN > 0 && !p.dead) { const s = G.p.indexOf(p); if (gainLife(s, p.l15DieGainN)) log(`${pn(s)} gana ${p.l15DieGainN} vida (muere ${cn(c)}).`); } } catch (e) { console.error(e); }
+  return r;
+}; }
+{ const _el15b = eoeLine; eoeLine = function (a, l, PE) {
+  const t = l.replace(/\.$/, '').trim(); let m;
+  if ((m = t.match(/^when enchanted creature dies, (mill cards equal to its power\. return ~ to its owner's hand and up to one creature card milled this way to the battlefield under your control)$/))) { a.l15DestinyT = true; return x26Trig(a, { ev: 'l15flag' }); }
+  return _el15b.apply(this, arguments);
+}; }
+
+/* ---------- choices made by other players ---------- */
+CHGEN.l15Yang = function* (s, op, ctx) {
+  const title = chTitle(ctx, 'The Legend of Yangchen'); const order = [s, ...aliveSeats().filter(q => q !== s)]; const chosen = [];
+  for (const o of order) {
+    const list = permsAll().filter(c => c.ctl !== s && alive(c.ctl) && l15Mv(c) >= 3 && !chosen.includes(c));
+    if (!list.length) break;
+    const k = yield { t: 'ask', o, labels: ['Ninguno', ...list.map(c => `${cn(c)} (${pn(c.ctl)})`)], title: `${title}: elige hasta un permanente de valor 3 o más de los oponentes de ${pn(s)}`, ai: () => { const pick = bestBy(list.filter(c => c.ctl !== o), c => value(c)); return pick ? list.indexOf(pick) + 1 : 0; } };
+    const c = list[+k - 1]; if (c) { chosen.push(c); log(`${pn(o)} elige ${cn(c)}.`); }
+  }
+  for (const c of chosen) if (c.zone === 'bf') moveCard(c, 'exile');
+  if (chosen.length) log(`Se exilian ${chosen.map(cn).join(', ')}.`, 'bad');
+};
+CHWHO.l15Yang = s => [s, ...aliveSeats().filter(q => q !== s)];
+CHGEN.l15AzulaEx = function* (s, op, ctx) {
+  const o = op.o; if (o == null || !alive(o)) return; const title = chTitle(ctx, 'Azula, Cunning Usurper'); const ids = [];
+  const cre = permsOf(o).filter(c => isCreature(c) && !c.token);
+  if (cre.length) { const k = cre.length === 1 ? 0 : yield { t: 'ask', o, labels: cre.map(cn), title: `${title}: exilia una criatura que no sea ficha`, ai: () => cre.indexOf(bestBy(cre, c => -value(c))) }; const c = cre[+k] || cre[0]; moveCard(c, 'exile'); ids.push(c.id); log(`${pn(o)} exilia ${cn(c)}.`); }
+  const gy = G.p[o].gy.map(id => G.cards[id]).filter(c => c && !isLand(c));
+  if (gy.length) { const k = gy.length === 1 ? 0 : yield { t: 'ask', o, labels: gy.map(cn), title: `${title}: exilia una carta que no sea tierra de tu cementerio`, ai: () => gy.indexOf(bestBy(gy, c => -value(c))) }; const c = gy[+k] || gy[0]; moveCard(c, 'exile'); ids.push(c.id); log(`${pn(o)} exilia ${cn(c)} de su cementerio.`); }
+  const src = G.cards[op.src]; if (ids.length && src) { (G.p[s].impulse ||= []).push({ ids: ids.filter(id => G.cards[id].zone === 'exile' && !G.cards[id].token), left: 9999, anyMana: true, l15Azula: src.id, src: 'Azula' }); log(`${pn(s)} podrá lanzar esas cartas durante su turno mientras tenga a ${cn(src)}.`); }
+};
+CHWHO.l15AzulaEx = (s, op) => (op.o != null ? [op.o] : []);
+CHGEN.l15Disorient = function* (s, op, ctx) {
+  const title = chTitle(ctx, 'Disorienting Choice'); let still = 0;
+  for (const c0 of op.ids) { const c = G.cards[c0]; if (!c || c.zone !== 'bf') continue; const o = c.ctl;
+    const k = yield { t: 'ask', o, labels: [`Exiliar ${cn(c)}`, `Quedármelo (${pn(s)} buscará una tierra más)`], title: `${title}: ¿exilias tu ${cn(c)}?`, ai: () => (value(c) <= 2 ? 0 : 1) };
+    if (+k === 0) { moveCard(c, 'exile'); log(`${pn(o)} exilia ${cn(c)}.`); } else { still++; log(`${pn(o)} se queda ${cn(c)}.`); } }
+  if (still) { const lands = G.p[s].lib.map(id => G.cards[id]).filter(isLand).slice(0, still); for (const l of lands) moveCard(l, 'bf', { ctl: s, tapped: true }); shuffle(G.p[s].lib); if (lands.length) log(`${pn(s)} pone ${lands.length} tierra${lands.length > 1 ? 's' : ''} en el campo girada${lands.length > 1 ? 's' : ''}.`); }
+};
+CHWHO.l15Disorient = (s, op) => [...new Set(op.ids.map(id => G.cards[id]).filter(c => c && c.zone === 'bf').map(c => c.ctl))];
+CHGEN.l15Teach = function* (s, op, ctx) {
+  const o = op.o; const lands = op.ids.map(id => G.cards[id]).filter(c => c && c.zone === 'lib'); const title = chTitle(ctx, 'Elemental Teachings');
+  log(`${pn(s)} revela ${lands.map(cn).join(', ') || 'nada'}.`); const toGy = [];
+  for (let i = 0; i < 2 && lands.length - toGy.length > 0 && o != null; i++) { const rest = lands.filter(c => !toGy.includes(c)); const k = rest.length === 1 ? 0 : yield { t: 'ask', o, labels: rest.map(cn), title: `${title}: elige una tierra que va al cementerio (${i + 1} de 2)`, ai: () => rest.indexOf(bestBy(rest, c => value(c) + (AB(c).mana && AB(c).mana.cols.length > 1 ? 2 : 0))) }; toGy.push(rest[+k] || rest[0]); }
+  for (const c of toGy) moveCard(c, 'gy'); for (const c of lands.filter(x => !toGy.includes(x))) moveCard(c, 'bf', { ctl: s, tapped: true }); shuffle(G.p[s].lib);
+  log(`${toGy.length ? toGy.map(cn).join(', ') + ' van al cementerio; ' : ''}${pn(s)} pone el resto en el campo girado.`);
+};
+CHWHO.l15Teach = (s, op) => (op.o != null ? [op.o] : []);
+CHGEN.l15Druid = function* (s, op, ctx) {
+  const title = chTitle(ctx, 'Druid of Purification'); const order = [s, ...aliveSeats().filter(q => q !== s)]; const chosen = [];
+  for (const o of order) {
+    const list = permsAll().filter(c => c.ctl !== s && (isType(c, 'artifact') || isType(c, 'enchantment')) && !chosen.includes(c)); if (!list.length) break;
+    const k = yield { t: 'ask', o, labels: ['Ninguno', ...list.map(c => `${cn(c)} (${pn(c.ctl)})`)], title: `${title}: puedes elegir un artefacto o encantamiento que ${pn(s)} no controle`, ai: () => { const pick = bestBy(list.filter(c => c.ctl !== o), c => value(c)); return pick ? list.indexOf(pick) + 1 : 0; } };
+    const c = list[+k - 1]; if (c) { chosen.push(c); log(`${pn(o)} elige ${cn(c)}.`); }
+  }
+  for (const c of chosen) if (c.zone === 'bf') destroy(c); if (chosen.length) log(`Se destruyen ${chosen.map(cn).join(', ')}.`, 'bad');
+};
+CHWHO.l15Druid = s => [s, ...aliveSeats().filter(q => q !== s)];
+
+/* ---------- targets ---------- */
+const l15CreOk = (ctx, c, mine, opp) => !!(c && c.zone === 'bf' && isCreature(c) && (!mine || c.ctl === ctx.seat) && (!opp || c.ctl !== ctx.seat) && !hasKw(c, 'shroud') && (c.ctl === ctx.seat || !hasKw(c, 'hexproof')));
+EOE_TGT.l15AvState = { valid: (op, ctx, x) => l15CreOk(ctx, x && x.card, true), target: (op, ctx) => bestBy(permsOf(ctx.seat).filter(c => l15CreOk(ctx, c, true)), c => value(c) + (c.atk != null ? 3 : 0)) || null };
+EOE_TGT.l15Excess = { valid: (op, ctx, x) => l15CreOk(ctx, x && x.card, false, true), target: (op, ctx) => bestBy(permsAll().filter(c => l15CreOk(ctx, c, false, true)), c => value(c) + (toughLeft(c) <= op.n ? 5 : -5)) || null };
+EOE_TGT.l15Coup = { valid: (op, ctx, x) => !!(x && x.card && x.card.zone === 'bf' && (isCreature(x.card) || isType(x.card, 'artifact')) && !hasKw(x.card, 'shroud') && (x.card.ctl === ctx.seat || !hasKw(x.card, 'hexproof'))), target: (op, ctx) => { const e = (pctr(G.p[ctx.seat]).energy || 0) + 4; return bestBy(permsAll().filter(c => c.ctl !== ctx.seat && (isCreature(c) || isType(c, 'artifact')) && !hasKw(c, 'hexproof') && !hasKw(c, 'shroud')), c => (l15Mv(c) <= e ? 10 : 0) + value(c)) || null; } };
+EOE_TGT.l15PickT = { valid: (op, ctx, x) => !!(x && x.card && !(op.excl && op.excl.has(x.card.id)) && l15CreOk(ctx, x.card, op.mine)), target: () => null };
+
+/* ---------- ops ---------- */
+function l15PutTop(s, list) { for (const c of list.slice().reverse()) moveCard(c, 'lib', { pos: 'top' }); }
+function l15Bottom(list) { const l = list.filter(c => c && (c.zone === 'lib' || c.zone === 'exile')); shuffle(l); for (const c of l) moveCard(c, 'lib', { pos: 'bottom' }); }
+function l15AirSpellDo(s, t, ctx) {
+  if (!t) return;
+  if (t.zone === 'stack') { const o = t.owner; moveCard(t, 'exile'); if (G.stack === t.id) G.stack = null; if (!t.token) (G.p[o].impulse ||= []).push({ ids: [t.id], left: 9999, alt: { generic: 2, pips: [] }, src: 'Airbend' }); log(`${cn(t)} sale despedido por el aire desde la pila: ${pn(o)} puede lanzarlo desde el exilio por {2}.`); avBend(s, 'air'); return; }
+  XOPS.avAirbend({ f: 'creature' }, ctx, t);
+}
+function l15StackSpell(s) { const c = G.stack != null ? G.cards[G.stack] : null; return c && c.zone === 'stack' ? c : null; }
+function l15WrathDo(s, keep, ctx, lock = true) { const list = permsAll().filter(c => isCreature(c) && c !== keep); for (const c of list) XOPS.avAirbend({ f: 'creature' }, ctx, c); if (lock) l15WrathLockDo(s); }
+function l15WrathLockDo(s) { (G.l15Wrath ||= []).push({ by: s, until: Infinity, t: G.turnsTaken }); log(`Hasta el próximo turno de ${pn(s)}, sus oponentes solo pueden lanzar hechizos desde la mano.`); }
+{ const _bt15w = beginTurn; beginTurn = function (s) { try { if (G && G.l15Wrath) G.l15Wrath = G.l15Wrath.filter(x => !(x.by === s && G.turnsTaken > x.t)); } catch (e) { console.error(e); } return _bt15w.apply(this, arguments); }; }
+function l15KeepTwoDo(s, keep) { const list = permsAll().filter(c => isCreature(c) && !keep.includes(c)); for (const c of list) destroy(c); log(`${keep.length ? keep.map(cn).join(' y ') + ' se salvan; ' : ''}se destruyen las demás criaturas (${list.length}).`, 'bad'); }
+function l15HiddenOk(s, op) { if (op.opp == null) return true; return l15Opps(s).some(o => G.p[o].l15DT === G.turnsTaken && (G.p[o].l15DN || 0) >= op.opp); }
+async function l15PlayHidden(s, src, human) {
+  const c = src && src.hidden != null ? G.cards[src.hidden] : null; if (!c || c.zone !== 'exile') return;
+  if (isLand(c)) { const p = G.p[s]; if ((p.landsPlayed || 0) >= landLimit(s) || G.active !== s) { log('No puedes jugar esa tierra ahora.'); return; } p.landsPlayed = (p.landsPlayed || 0) + 1; p.landPlayed = true; src.hidden = null; moveCard(c, 'bf', { ctl: s }); log(`${pn(s)} juega ${cn(c)} sin pagar su coste.`); return; }
+  src.hidden = null;
+  if (human) { const n0 = UI.prompts.length; log(`${pn(s)} lanza ${cn(c)} sin pagar su coste.`); __R(ME, G, await castSpell(s, c, { free: true })); __R(ME, G, await resolveNewPrompts(n0)); }
+  else (G.pcast ||= []).push({ s, id: c.id });
+}
+function l15CelestineList(s) { const p = G.p[s]; const X = p.gainT === G.turnsTaken ? (p.gainedTurn || 0) : 0; return { X, list: p.gy.map(id => G.cards[id]).filter(c => c && l15IsCre(c) && l15Mv(c) <= X) }; }
+function l15XOf(ctx) { const src = l15Src(ctx); return ctx.x26Removed || ctx.amount || (src && (src.xPaid || src.xVal)) || 0; }
+function l15TokXDo(s, op, n) { if (!n) { log(`${pn(s)} no crea fichas (X = 0).`); return; } if (op.treasure) { applyOp({ k: 'treasure', n }, { seat: s }, null); return; } let k = 0; for (let i = 0; i < n && !tokenCap(s); i++) { makeToken(s, op.spec); k++; } log(`${pn(s)} crea ${k} ficha${k === 1 ? '' : 's'} de ${op.spec.name}.`); }
+function l15CoupDo(s, t, pay) { l14GetE(s, 4); if (!t || t.zone !== 'bf') return; const mv = l15Mv(t); if (!pay || !l14PayE(s, mv)) return; t.ctl = s; t.sick = true; t.att = isType(t, 'aura') ? t.att : (isType(t, 'equipment') ? null : t.att); recomputeMods(); log(`${pn(s)} gana el control de ${cn(t)}.`, 'bad'); }
+function l15PiaDo(s, n) { if (!(n > 0) || !l14PayE(s, n)) return; if (tokenCap(s)) return; makeToken(s, { name: 'Nalaar Aetherjet', p: n, t: n, colors: [], kws: ['flying'], type: 'Token Artifact — Vehicle', text: `Flying\nCrew 2` }); log(`${pn(s)} crea Nalaar Aetherjet, un Vehículo ${n}/${n} volador con tripular 2.`); }
+function l15RonaDo(s, o, c, yes) { if (!c) return; log(`${pn(o)} exilia al azar ${cn(c)} de su mano.`); if (!yes) return; if (isLand(c)) { moveCard(c, 'bf', { ctl: s }); log(`${pn(s)} pone ${cn(c)} en el campo bajo su control.`); } else (G.pcast ||= []).push({ s, id: c.id }); }
+Object.assign(XOPS, {
+  l15DieGain(op, ctx) { if (!ctx.kicked) return; const p = G.p[ctx.seat]; p.l15DieGainT = G.turnsTaken; p.l15DieGainN = (p.l15DieGainN && p.l15DieGainT === G.turnsTaken ? p.l15DieGainN : 0) + op.n; log(`Este turno, ${pn(ctx.seat)} gana ${op.n} vida cada vez que muere una criatura.`); },
+  l15Squad(op, ctx) { const s = ctx.seat; const c = l15Src(ctx); if (!c) return; const made = fxCopyOf(s, c, { n: op.n, noMult: false }); log(`Squad: ${pn(s)} crea ${made.length} copia${made.length === 1 ? '' : 's'} de ${cn(c)}.`); },
+  l15DigBf(op, ctx) { const s = ctx.seat; const top = l13Dig(s, op.n); const ok = top.filter(x => l13TypeOk(D(x), op.f) && l15Mv(x) <= op.mv); const c = bestBy(ok, x => l15Mv(x) + value(x) * 0.1); if (c) { moveCard(c, 'bf', { ctl: s }); log(`${pn(s)} pone ${cn(c)} en el campo.`); } l15Bottom(top.filter(x => x !== c)); },
+  l15AirSpell(op, ctx) { const s = ctx.seat; const sp = l15StackSpell(s); const src = l15Src(ctx); if (sp && sp.castBy != null && sp.castBy !== s && (l15Mv(sp) >= 3 || AB(sp).spell.some(o => ['destroy', 'exile', 'wipe', 'counter'].includes(o.k)))) { l15AirSpellDo(s, sp, ctx); return; } const t = bestBy(permsAll().filter(c => c.ctl !== s && avAirOk({ f: 'creature', other: true }, ctx, { card: c })), c => value(c)); if (t && (!src || t.id !== src.id)) l15AirSpellDo(s, t, ctx); },
+  l15SacThen(op, ctx) { const c = l15Src(ctx); if (!c || c.zone !== 'bf') return; sacrifice(c); log(`${pn(ctx.seat)} sacrifica ${cn(c)}.`); for (const o of op.ops) applyOp(o, ctx, null); },
+  l15Wrath(op, ctx) { const s = ctx.seat; const keep = bestBy(permsOf(s).filter(isCreature), c => value(c)); l15WrathDo(s, keep, ctx, op.lock !== false); },
+  l15WrathLock(op, ctx) { l15WrathLockDo(ctx.seat); },
+  l15AvState(op, ctx, t) { if (!t || t.zone !== 'bf') return; t.addTypes = (t.addTypes || []).concat([op.type]); t.l15AddT = G.turnsTaken; t.l15AddType = op.type; t.tkw.push(...op.kws); recomputeMods(); log(`${cn(t)} es también un ${op.type} y gana ${op.kws.map(k => KW_ES[k] || k).join(', ')} hasta el final del turno.`); },
+  l15SWR(op, ctx) { const s = ctx.seat; const p = G.p[s]; if (ctx.kicked) { for (const id of [...p.gy]) moveCard(G.cards[id], 'lib'); shuffle(p.lib); log(`${pn(s)} baraja su cementerio en su biblioteca, roba siete y ya no tiene tamaño máximo de mano.`); drawCards(s, 7); p.noMaxHand = true; } else drawCards(s, 2); },
+  l15Yang(op, ctx) { chGo('l15Yang', ctx.seat, {}, ctx); },
+  l15Yang2(op, ctx) { const s = ctx.seat; if (G.p[s].hand.length > 3) return; const o = bestBy(l15Opps(s), q => -G.p[q].hand.length); if (o == null) return; drawCards(o, 3); drawCards(s, 3); log(`${pn(o)} roba tres cartas y ${pn(s)} roba tres.`); },
+  l15Free(op, ctx) { l15FreeBot(ctx.seat, l15FreeCands(ctx.seat, op, ctx)); },
+  l15LookCast(op, ctx) { const s = ctx.seat; const top = l13Dig(s, op.n); const c = l15FreeBot(s, top); l15Bottom(top.filter(x => x !== c)); },
+  l15Solstice(op, ctx) { const s = ctx.seat; const r = l13RevealUntil(s, x => !isLand(x), 1); const c = r.got[0]; if (!c) return; const mtn = permsOf(s).filter(x => l14IsType(x, 'mountain')).length; if (l15Mv(c) < mtn && (isPermDef(D(c)) || l15Score(s, c) > 0)) { (G.pcast ||= []).push({ s, id: c.id }); log(`${pn(s)} lanzará ${cn(c)} sin pagar su coste.`); } else { moveCard(c, 'hand'); log(`${cn(c)} va a la mano de ${pn(s)}.`); } },
+  l15Hidden(op, ctx) { const s = ctx.seat; if (!l15HiddenOk(s, op)) { log('Ningún oponente ha recibido 7 o más de daño este turno.'); return; } l15PlayHidden(s, l15Src(ctx), false); },
+  l15Tamper(op, ctx) { const s = ctx.seat; const ml = millCards(s, 3); log(`${pn(s)} muele ${ml.length}.`); if (G.p[s].gy.length >= 20) l15PlayHidden(s, l15Src(ctx), false); },
+  l15Eladamri(op, ctx) { const s = ctx.seat; const top = G.p[s].lib.length ? G.cards[G.p[s].lib[0]] : null; const c = bestBy([...l15Hand(s), ...(top ? [top] : [])].filter(l15IsCre), x => l15Mv(x)); if (c) { log(`${pn(s)} revela ${cn(c)} y la pone en el campo.`); moveCard(c, 'bf', { ctl: s }); } },
+  l15MaralenEx(op, ctx) { const s = ctx.seat; const src = l15Src(ctx); const o = bestBy(l15Opps(s), q => G.p[q].lib.length); if (o == null || !src) return; const ids = []; for (let i = 0; i < 2 && G.p[o].lib.length; i++) { const c = G.cards[G.p[o].lib[0]]; moveCard(c, 'exile'); ids.push(c.id); } log(`${pn(s)} exilia ${ids.map(id => cn(G.cards[id])).join(' y ')} de la biblioteca de ${pn(o)}.`); if (ids.length) (G.p[s].impulse ||= []).push({ ids, left: 2, free: true, l15Maralen: src.id, l15T: G.turnsTaken, src: 'Maralen' }); },
+  l15AzulaEx(op, ctx) { const s = ctx.seat; const src = l15Src(ctx); const o = bestBy(l15Opps(s).filter(q => permsOf(q).some(c => isCreature(c) && !c.token)), q => Math.max(0, ...permsOf(q).filter(isCreature).map(value))); if (o == null) return; chGo('l15AzulaEx', s, { o, src: src ? src.id : null }, ctx); },
+  l15KeepTwo(op, ctx) { const s = ctx.seat; l15KeepTwoDo(s, permsOf(s).filter(isCreature).sort((a, b) => value(b) - value(a)).slice(0, 2)); },
+  l15DigX(op, ctx) { const s = ctx.seat; const X = l15XOf(ctx); const top = l13Dig(s, X); const c = bestBy(top.filter(x => l13TypeOk(D(x), op.f)), x => value(x)); if (c) { moveCard(c, 'hand'); log(`${pn(s)} revela ${cn(c)} y la pone en su mano.`); } l15Bottom(top.filter(x => x !== c)); },
+  l15Celestine(op, ctx) { const s = ctx.seat; const { list } = l15CelestineList(s); const c = bestBy(list, x => value(x)); if (c) { moveCard(c, 'bf', { ctl: s }); log(`${pn(s)} devuelve ${cn(c)} al campo.`); } },
+  l15TokX(op, ctx) { l15TokXDo(ctx.seat, op, l15XOf(ctx)); },
+  l15NoInd(op, ctx) { const list = permsAll().filter(c => c.ctl !== ctx.seat && !isLand(c)); for (const c of list) c.fxNoIndT = G.turnsTaken; log('Los permanentes no tierra de los oponentes pierden indestructible hasta el final del turno.'); },
+  l15WipeNL(op, ctx) { const list = permsAll().filter(c => !isLand(c)); for (const c of list) destroy(c); log(`Se destruyen todos los permanentes que no son tierra (${list.length}).`, 'bad'); },
+  l15ClueAmt(op, ctx) { const n = ctx.amount || 0; if (n) applyOp({ k: 'avClue', n }, ctx, null); },
+  l15Fleet(op, ctx) { const s = ctx.seat; const src = l15Src(ctx); const n = 1 + ((src && src.kickN) || 0); if (src) src.kickN = 0; const list = permsOf(s).filter(c => isCreature(c) && !c.tapped).sort((a, b) => value(b) - value(a)).slice(0, n); for (const c of list) c.l15FleetT = G.turnsTaken; if (list.length) log(`${list.map(cn).join(', ')} crearán un Soldado atacando al atacar este turno.`); },
+  l15Dread(op, ctx) { const c = l15Src(ctx); if (!c || c.zone !== 'bf' || !(c.l15ExP > 0)) return; c.tp += c.l15ExP; c.tt += c.l15ExP; recomputeMods(); log(`${cn(c)} obtiene +${c.l15ExP}/+${c.l15ExP} hasta el final del turno.`); },
+  l15RetAll(op, ctx) { const s = ctx.seat; const list = G.p[s].gy.map(id => G.cards[id]).filter(c => c && op.f.some(f => new RegExp('\\b' + f + '\\b', 'i').test(D(c).type_line || ''))); for (const c of list) moveCard(c, 'bf', { ctl: s }); log(`${pn(s)} devuelve ${list.length} carta${list.length === 1 ? '' : 's'} del cementerio al campo.`); },
+  l15ReanCtr(op, ctx) { const s = ctx.seat; const c = bestBy(G.p[s].gy.map(id => G.cards[id]).filter(x => x && l15IsCre(x)), x => value(x)); if (!c) return; moveCard(c, 'bf', { ctl: s }); if (c.zone === 'bf') { c.cnt[op.kind] = (c.cnt[op.kind] || 0) + 1; recomputeMods(); } log(`${pn(s)} devuelve ${cn(c)} al campo con un contador de ${KW_ES[op.kind] || op.kind}.`); },
+  l15Katherine(op, ctx) { const s = ctx.seat; const src = l15Src(ctx); const c = src ? G.cards[src.id] : null; const pile = l13Dig(s, 6); if (c && c.zone === 'gy') pile.push(c); shuffle(pile); for (const x of pile) moveCard(x, 'lib', { pos: 'top' }); log(`${pn(s)} baraja ${c ? cn(c) + ' y ' : ''}sus seis primeras cartas boca abajo y las pone encima de su biblioteca.`); },
+  l15Excess(op, ctx, t) { if (!t || t.zone !== 'bf') return; const s = ctx.seat; const left = Math.max(0, toughLeft(t)); dealDamage(t, op.n, l15Src(ctx)); log(`${cn(l15Src(ctx))} hace ${op.n} de daño a ${cn(t)}.`, 'bad'); const ex = op.noGain ? 0 : Math.max(0, op.n - left); if (ex && gainLife(s, ex)) log(`${pn(s)} gana ${ex} vida${ex > 1 ? 's' : ''} (daño excedente).`); },
+  l15Sculpt(op, ctx) { const s = ctx.seat; const t = ctx.respTo != null ? G.cards[ctx.respTo] : null; if (!t || !permsOf(s).some(c => isCreature(c) && l14IsType(c, 'wizard'))) return; const n = t.manaSpent || 0; if (!n) return; const p = G.p[s]; p.drainNext = (p.drainNext || 0) + n; log(`${pn(s)} recibirá {C}×${n} en su próxima fase principal (Mana Sculpt).`); },
+  l15Portent(op, ctx) { log(`${pn(ctx.seat)} mira las tres cartas de arriba de su biblioteca y las deja igual.`); },
+  l15PortentDraw(op, ctx) { (G.l15Portent ||= []).push({ s: ctx.seat, t: G.turnsTaken }); log(`${pn(ctx.seat)} robará una carta al principio del mantenimiento del próximo turno.`); },
+  l15Disorient(op, ctx) { const s = ctx.seat; const ids = []; for (const o of l15Opps(s)) { const c = bestBy(permsOf(o).filter(x => (isType(x, 'artifact') || isType(x, 'enchantment')) && !hasKw(x, 'hexproof') && !hasKw(x, 'shroud')), x => value(x)); if (c) ids.push(c.id); } if (ids.length) chGo('l15Disorient', s, { ids }, ctx); },
+  l15Teach(op, ctx) { const s = ctx.seat; const seen = new Set(); const ids = []; for (const c of G.p[s].lib.map(id => G.cards[id]).filter(isLand).sort((a, b) => value(b) - value(a))) { if (ids.length >= 4 || seen.has(D(c).name)) continue; seen.add(D(c).name); ids.push(c.id); } const o = bestBy(l15Opps(s), q => -G.p[q].life); chGo('l15Teach', s, { ids, o }, ctx); },
+  l15Shigeki(op, ctx) { const s = ctx.seat; const top = l13Dig(s, 4); const land = bestBy(top.filter(isLand), x => value(x)); if (land) moveCard(land, 'bf', { ctl: s, tapped: true }); for (const c of top) if (c !== land) moveCard(c, 'gy'); log(`${pn(s)} revela ${top.length} cartas${land ? ` y pone ${cn(land)} en el campo girada` : ''}; el resto va al cementerio.`); },
+  l15RegrowX(op, ctx) { const s = ctx.seat; const n = ctx.amount || 0; const list = G.p[s].gy.map(id => G.cards[id]).filter(c => c && !/\blegendary\b/i.test(D(c).type_line || '')).sort((a, b) => value(b) - value(a)).slice(0, n); for (const c of list) moveCard(c, 'hand'); if (list.length) log(`${pn(s)} devuelve ${list.map(cn).join(', ')} a su mano.`); },
+  l15Destiny(op, ctx) { const s = ctx.seat; const src = l15Src(ctx); const ml = millCards(s, op.p || 0); log(`${pn(s)} muele ${ml.length}.`); if (src && src.zone === 'gy') { moveCard(src, 'hand'); log(`${cn(src)} vuelve a la mano.`); } const c = bestBy(ml.filter(x => x.zone === 'gy' && l15IsCre(x)), x => value(x)); if (c) { moveCard(c, 'bf', { ctl: s }); log(`${pn(s)} pone ${cn(c)} en el campo.`); } },
+  l15Recruit(op, ctx) { const s = ctx.seat; const list = G.p[s].lib.map(id => G.cards[id]).filter(c => l13TypeOk(D(c), op.f)).sort((a, b) => value(b) - value(a)).slice(0, 3); shuffle(G.p[s].lib); l15PutTop(s, list); log(`${pn(s)} revela ${list.map(cn).join(', ') || 'ninguna'} y la${list.length > 1 ? 's' : ''} pone encima de su biblioteca.`); },
+  l15Druid(op, ctx) { chGo('l15Druid', ctx.seat, {}, ctx); },
+  l15Coup(op, ctx, t) { const s = ctx.seat; const e = (pctr(G.p[s]).energy || 0) + 4; l15CoupDo(s, t, !!t && l15Mv(t) <= e && value(t) >= 2); },
+  l15Pia(op, ctx) { const s = ctx.seat; const e = pctr(G.p[s]).energy || 0; if (e >= 2) l15PiaDo(s, Math.min(e, 5)); },
+  l15PumpSacMv(op, ctx) { const c = l15Src(ctx); const n = ctx.sacMv || 0; if (!c || c.zone !== 'bf' || !n) return; c.tp += n; recomputeMods(); log(`${cn(c)} obtiene +${n}/+0 hasta el final del turno.`); },
+  l15CtrPlayer(op, ctx) { const s = ctx.seat; const list = permsOf(s).filter(isCreature); for (const c of list) addCounters(c, 1, 'p1', true); if (list.length) log(`Las criaturas de ${pn(s)} reciben un contador +1/+1.`); },
+  l15Pain(op, ctx) { const s = ctx.seat; const src = l15Src(ctx); if (!op.n) return; const cand = l15Opps(s).filter(q => q !== op.caster); const t = bestBy(cand, q => -G.p[q].life) ?? (op.caster !== s ? s : null); if (t == null) return; damagePlayer(t, op.n, src); log(`${cn(src)} hace ${op.n} de daño a ${pn(t)}.`, 'bad'); },
+  l15Rona(op, ctx) { const s = ctx.seat; const o = op.o; if (o == null || !G.p[o].hand.length) return; const c = G.cards[G.p[o].hand[Math.floor(Math.random() * G.p[o].hand.length)]]; moveCard(c, 'exile'); l15RonaDo(s, o, c, true); }
+});
+Object.assign(XPROMPT, {
+  async l15DigBf(op, pr) { const s = pr.ctx.seat; const top = l13Dig(s, op.n); log(`${pn(s)} mira ${top.map(cn).join(', ')}.`); const ok = top.filter(x => l13TypeOk(D(x), op.f) && l15Mv(x) <= op.mv); const c = ok.length ? __R(ME, G, await pickFromList(ok, `${pr.title}: puedes poner una criatura de valor ${op.mv} o menos en el campo (Cancelar = ninguna)`)) : null; if (c) { moveCard(c, 'bf', { ctl: s }); log(`${pn(s)} pone ${cn(c)} en el campo.`); } l15Bottom(top.filter(x => x !== c)); },
+  async l15AirSpell(op, pr) { const s = pr.ctx.seat; const src = l15Src(pr.ctx); const sp = l15StackSpell(s); const cre = permsAll().filter(c => (!src || c.id !== src.id) && avAirOk({ f: 'creature', other: true }, pr.ctx, { card: c })); const list = [...(sp ? [sp] : []), ...cre]; if (!list.length) return; const t = __R(ME, G, await pickFromList(list, `${pr.title}: airbend hasta una criatura${sp ? ' o el hechizo de la pila' : ''} (Cancelar = ninguno)`)); if (t) l15AirSpellDo(s, t, pr.ctx); },
+  async l15Wrath(op, pr) { const s = pr.ctx.seat; const t = __R(ME, G, await pickTarget({ k: 'l15PickT' }, pr.ctx, `${pr.title}: elige hasta una criatura que se salva (Esc = ninguna)`)); l15WrathDo(s, t && t.card, pr.ctx, op.lock !== false); },
+  async l15Yang2(op, pr) { const s = pr.ctx.seat; const os = l15Opps(s); if (!os.length) return; const i = __R(ME, G, await askChoice(`${pr.title}: ¿un oponente roba tres para que tú robes tres?`, [...os.map(q => `${pn(q)} roba tres`), 'No'])); if (i == null || +i < 0 || +i >= os.length) return; const o = os[+i]; drawCards(o, 3); drawCards(s, 3); log(`${pn(o)} roba tres cartas y ${pn(s)} roba tres.`); },
+  async l15Free(op, pr) { __R(ME, G, await l15FreeHuman(pr.ctx.seat, l15FreeCands(pr.ctx.seat, op, pr.ctx), pr.title)); },
+  async l15LookCast(op, pr) { const s = pr.ctx.seat; const top = l13Dig(s, op.n); log(`${pn(s)} mira ${top.map(cn).join(', ')}.`); const c = __R(ME, G, await l15FreeHuman(s, top, pr.title)); l15Bottom(top.filter(x => x !== c && x.zone === 'lib')); },
+  async l15Solstice(op, pr) { const s = pr.ctx.seat; const r = l13RevealUntil(s, x => !isLand(x), 1); const c = r.got[0]; if (!c) return; log(`${pn(s)} exilia ${[...r.rest, c].map(cn).join(', ')}.`); const mtn = permsOf(s).filter(x => l14IsType(x, 'mountain')).length; if (l15Mv(c) < mtn && __R(ME, G, await askYesNo(pr.title, `¿Lanzar ${D(c).name} sin pagar su coste?`))) { const n0 = UI.prompts.length; __R(ME, G, await castSpell(s, c, { free: true })); __R(ME, G, await resolveNewPrompts(n0)); return; } moveCard(c, 'hand'); log(`${cn(c)} va a la mano de ${pn(s)}.`); },
+  async l15Hidden(op, pr) { const s = pr.ctx.seat; if (!l15HiddenOk(s, op)) { toast('Ningún oponente ha recibido 7 o más de daño este turno.'); return; } const src = l15Src(pr.ctx); const c = src && src.hidden != null ? G.cards[src.hidden] : null; if (!c) return; if (__R(ME, G, await askYesNo(pr.title, `¿Jugar ${D(c).name} sin pagar su coste?`))) __R(ME, G, await l15PlayHidden(s, src, true)); },
+  async l15Tamper(op, pr) { const s = pr.ctx.seat; if (__R(ME, G, await askYesNo(pr.title, '¿Moler tres cartas?'))) { const ml = millCards(s, 3); log(`${pn(s)} muele ${ml.length}.`); } if (G.p[s].gy.length < 20) return; const src = l15Src(pr.ctx); const c = src && src.hidden != null ? G.cards[src.hidden] : null; if (c && __R(ME, G, await askYesNo(pr.title, `Tienes 20 o más cartas en el cementerio: ¿jugar ${D(c).name} sin pagar su coste?`))) __R(ME, G, await l15PlayHidden(s, src, true)); },
+  async l15Eladamri(op, pr) { const s = pr.ctx.seat; const top = G.p[s].lib.length ? G.cards[G.p[s].lib[0]] : null; const list = [...l15Hand(s), ...(top ? [top] : [])]; if (!list.length) return; const c = __R(ME, G, await pickFromList(list, `${pr.title}: revela una carta de tu mano o la de arriba de tu biblioteca`)); if (!c) return; log(`${pn(s)} revela ${cn(c)}.`); if (l15IsCre(c)) { moveCard(c, 'bf', { ctl: s }); log(`${pn(s)} pone ${cn(c)} en el campo.`); } },
+  async l15MaralenEx(op, pr) { const s = pr.ctx.seat; const os = l15Opps(s); if (!os.length) return; const i = __R(ME, G, await askChoice(`${pr.title}: elige el oponente objetivo`, os.map(pn))); const o = os[i != null && +i >= 0 ? +i : 0]; const src = l15Src(pr.ctx); const ids = []; for (let k = 0; k < 2 && G.p[o].lib.length; k++) { const c = G.cards[G.p[o].lib[0]]; moveCard(c, 'exile'); ids.push(c.id); } log(`${pn(s)} exilia ${ids.map(id => cn(G.cards[id])).join(' y ')} de la biblioteca de ${pn(o)}.`); if (ids.length && src) (G.p[s].impulse ||= []).push({ ids, left: 2, free: true, l15Maralen: src.id, l15T: G.turnsTaken, src: 'Maralen' }); },
+  async l15AzulaEx(op, pr) { const s = pr.ctx.seat; const os = l15Opps(s); if (!os.length) return; const i = __R(ME, G, await askChoice(`${pr.title}: elige el oponente objetivo`, os.map(pn))); const src = l15Src(pr.ctx); chGo('l15AzulaEx', s, { o: os[i != null && +i >= 0 ? +i : 0], src: src ? src.id : null }, pr.ctx); },
+  async l15KeepTwo(op, pr) { const keep = __R(ME, G, await l10PickMany(pr, { k: 'l15PickT' }, 2, 'elige una criatura que se salva')); l15KeepTwoDo(pr.ctx.seat, keep); },
+  async l15DigX(op, pr) { const s = pr.ctx.seat; const top = l13Dig(s, l15XOf(pr.ctx)); log(`${pn(s)} mira ${top.map(cn).join(', ') || 'nada'}.`); const ok = top.filter(x => l13TypeOk(D(x), op.f)); const c = ok.length ? __R(ME, G, await pickFromList(ok, `${pr.title}: puedes poner un artefacto en tu mano (Cancelar = ninguno)`)) : null; if (c) { moveCard(c, 'hand'); log(`${pn(s)} revela ${cn(c)} y la pone en su mano.`); } l15Bottom(top.filter(x => x !== c)); },
+  async l15Celestine(op, pr) { const s = pr.ctx.seat; const { X, list } = l15CelestineList(s); if (!list.length) { log(`${pn(s)} no tiene criaturas de valor ${X} o menos en el cementerio.`); return; } let c = null; for (let k = 0; !c && k < 40; k++) c = __R(ME, G, await pickFromList(list, `${pr.title}: elige una criatura de valor ${X} o menos`)); c = c || list[0]; moveCard(c, 'bf', { ctl: s }); log(`${pn(s)} devuelve ${cn(c)} al campo.`); },
+  async l15Fleet(op, pr) { const s = pr.ctx.seat; const src = l15Src(pr.ctx); const n = 1 + ((src && src.kickN) || 0); if (src) src.kickN = 0; const got = __R(ME, G, await l10PickMany(pr, { k: 'l15PickT' }, n, 'elige una criatura objetivo')); for (const c of got) c.l15FleetT = G.turnsTaken; if (got.length) log(`${got.map(cn).join(', ')} crearán un Soldado atacando al atacar este turno.`); },
+  async l15ReanCtr(op, pr) { const s = pr.ctx.seat; const list = G.p[s].gy.map(id => G.cards[id]).filter(x => x && l15IsCre(x)); if (!list.length) return; const c = __R(ME, G, await pickFromList(list, `${pr.title}: puedes devolver una criatura al campo (Cancelar = ninguna)`)); if (!c) return; moveCard(c, 'bf', { ctl: s }); if (c.zone === 'bf') { c.cnt[op.kind] = (c.cnt[op.kind] || 0) + 1; recomputeMods(); } log(`${pn(s)} devuelve ${cn(c)} al campo con un contador de ${KW_ES[op.kind] || op.kind}.`); },
+  async l15Portent(op, pr) { const s = pr.ctx.seat; const all = [s, ...l15Opps(s)]; const i = __R(ME, G, await askChoice(`${pr.title}: elige el jugador objetivo`, all.map(pn))); const o = all[i != null && +i >= 0 ? +i : 0]; const top = l13Dig(o, 3); if (!top.length) return; const order = []; while (order.length < top.length) { const rest = top.filter(c => !order.includes(c)); const c = rest.length === 1 ? rest[0] : __R(ME, G, await pickFromList(rest, `${pr.title}: elige la carta que queda ${order.length === 0 ? 'arriba del todo' : 'debajo de ' + cn(order[order.length - 1])}`)); order.push(c || rest[0]); } l15PutTop(o, order); if (__R(ME, G, await askYesNo(pr.title, `¿Hacer que ${pn(o)} baraje su biblioteca?`))) { shuffle(G.p[o].lib); log(`${pn(o)} baraja su biblioteca.`); } else log(`${pn(s)} ordena las tres cartas de arriba de la biblioteca de ${pn(o)}.`); },
+  async l15Disorient(op, pr) { const s = pr.ctx.seat; const ids = []; for (const o of l15Opps(s)) { const list = permsOf(o).filter(x => (isType(x, 'artifact') || isType(x, 'enchantment')) && !hasKw(x, 'hexproof') && !hasKw(x, 'shroud')); if (!list.length) continue; const c = __R(ME, G, await pickFromList(list, `${pr.title}: elige hasta un artefacto o encantamiento de ${pn(o)} (Cancelar = ninguno)`)); if (c) ids.push(c.id); } if (ids.length) chGo('l15Disorient', s, { ids }, pr.ctx); },
+  async l15Teach(op, pr) { const s = pr.ctx.seat; const got = []; for (let i = 0; i < 4; i++) { const list = G.p[s].lib.map(id => G.cards[id]).filter(c => isLand(c) && !got.some(g => D(g).name === D(c).name)); if (!list.length) break; const c = __R(ME, G, await pickFromList(list, `${pr.title}: elige una tierra con un nombre distinto (${i + 1} de 4; Cancelar = parar)`)); if (!c) break; got.push(c); } const os = l15Opps(s); const o = os.length ? bestBy(os, q => -G.p[q].life) : null; chGo('l15Teach', s, { ids: got.map(c => c.id), o }, pr.ctx); },
+  async l15Shigeki(op, pr) { const s = pr.ctx.seat; const top = l13Dig(s, 4); log(`${pn(s)} revela ${top.map(cn).join(', ')}.`); const lands = top.filter(isLand); const land = lands.length ? __R(ME, G, await pickFromList(lands, `${pr.title}: puedes poner una tierra en el campo girada (Cancelar = ninguna)`)) : null; if (land) moveCard(land, 'bf', { ctl: s, tapped: true }); for (const c of top) if (c !== land) moveCard(c, 'gy'); },
+  async l15RegrowX(op, pr) { const s = pr.ctx.seat; const n = pr.ctx.amount || 0; const got = []; for (let i = 0; i < n; i++) { const list = G.p[s].gy.map(id => G.cards[id]).filter(c => c && !/\blegendary\b/i.test(D(c).type_line || '') && !got.includes(c)); if (!list.length) break; const c = __R(ME, G, await pickFromList(list, `${pr.title}: elige una carta no legendaria (${i + 1} de ${n})`)); if (!c) break; got.push(c); } for (const c of got) moveCard(c, 'hand'); if (got.length) log(`${pn(s)} devuelve ${got.map(cn).join(', ')} a su mano.`); },
+  async l15Destiny(op, pr) { const s = pr.ctx.seat; const src = l15Src(pr.ctx); const ml = millCards(s, op.p || 0); log(`${pn(s)} muele ${ml.map(cn).join(', ') || 'nada'}.`); if (src && src.zone === 'gy') { moveCard(src, 'hand'); log(`${cn(src)} vuelve a la mano.`); } const ok = ml.filter(x => x.zone === 'gy' && l15IsCre(x)); const c = ok.length ? __R(ME, G, await pickFromList(ok, `${pr.title}: puedes poner en el campo una criatura molida (Cancelar = ninguna)`)) : null; if (c) { moveCard(c, 'bf', { ctl: s }); log(`${pn(s)} pone ${cn(c)} en el campo.`); } },
+  async l15Recruit(op, pr) { const s = pr.ctx.seat; const got = []; for (;;) { const list = G.p[s].lib.map(id => G.cards[id]).filter(c => l13TypeOk(D(c), op.f) && !got.includes(c)); if (!list.length) break; const c = __R(ME, G, await pickFromList(list, `${pr.title}: elige cartas de ${op.f} (Cancelar = terminar; la primera que elijas quedará arriba)`)); if (!c) break; got.push(c); } shuffle(G.p[s].lib); l15PutTop(s, got); log(`${pn(s)} revela ${got.map(cn).join(', ') || 'ninguna'} y la${got.length > 1 ? 's' : ''} pone encima de su biblioteca.`); },
+  async l15Coup(op, pr) { const s = pr.ctx.seat; const t = __R(ME, G, await pickTarget({ k: 'l15Coup' }, pr.ctx, `${pr.title}: elige un artefacto o una criatura objetivo`)); const c = t && t.card; const e = (pctr(G.p[s]).energy || 0) + 4; const yes = !!c && l15Mv(c) <= e && __R(ME, G, await askYesNo(pr.title, `Tendrás ${e} de energía: ¿pagar ${l15Mv(c)} para ganar el control de ${cn(c)}?`)); l15CoupDo(s, c, yes); },
+  async l15Pia(op, pr) { const s = pr.ctx.seat; const e = pctr(G.p[s]).energy || 0; if (!e) return; const opts = Array.from({ length: e + 1 }, (_, i) => String(i)); const i = __R(ME, G, await askChoice(`${pr.title}: ¿cuánta energía pagas para crear Nalaar Aetherjet X/X? (tienes ${e})`, opts)); l15PiaDo(s, +(i != null && +i >= 0 ? i : 0)); },
+  async l15CtrPlayer(op, pr) { const s = pr.ctx.seat; const all = [s, ...l15Opps(s)]; const i = __R(ME, G, await askChoice(`${pr.title}: elige el jugador objetivo`, all.map(pn))); const o = all[i != null && +i >= 0 ? +i : 0]; const list = permsOf(o).filter(isCreature); for (const c of list) addCounters(c, 1, 'p1', true); if (list.length) log(`Las criaturas de ${pn(o)} reciben un contador +1/+1.`); },
+  async l15Pain(op, pr) { const s = pr.ctx.seat; const src = l15Src(pr.ctx); if (!op.n) return; const all = aliveSeats().filter(q => q !== op.caster); if (!all.length) return; const i = __R(ME, G, await askChoice(`${pr.title}: elige otro jugador objetivo (${op.n} de daño)`, all.map(pn))); const t = all[i != null && +i >= 0 ? +i : 0]; damagePlayer(t, op.n, src); log(`${cn(src)} hace ${op.n} de daño a ${pn(t)}.`, 'bad'); },
+  async l15Rona(op, pr) { const s = pr.ctx.seat; const o = op.o; if (o == null || !G.p[o].hand.length) return; const c = G.cards[G.p[o].hand[Math.floor(Math.random() * G.p[o].hand.length)]]; moveCard(c, 'exile'); const yes = __R(ME, G, await askYesNo(pr.title, isLand(c) ? `¿Poner ${D(c).name} en el campo bajo tu control?` : `¿Lanzar ${D(c).name} sin pagar su coste?`)); if (yes && !isLand(c)) { log(`${pn(o)} exilia al azar ${cn(c)} de su mano.`); const n0 = UI.prompts.length; __R(ME, G, await castSpell(s, c, { free: true })); __R(ME, G, await resolveNewPrompts(n0)); return; } l15RonaDo(s, o, c, yes); }
+});
+Object.assign(XTEXT, {
+  l15DieGain: o => `Con el coste adicional: ganas ${o.n} vida cada vez que muere una criatura este turno`, l15Squad: o => `Crear ${o.n} copia(s)`, l15DigBf: o => `Mirar ${o.n}: puedes poner una ${o.f} de valor ${o.mv} o menos en el campo`, l15AirSpell: () => 'Airbend hasta una criatura o un hechizo', l15SacThen: o => `Sacrificarla: ${o.ops.map(opText).join(', ')}`,
+  l15Wrath: () => 'Salvar hasta una criatura, airbend del resto', l15WrathLock: () => 'Hasta tu próximo turno, los oponentes solo lanzan desde la mano', l15AvState: o => `Tu criatura es ${o.type} y gana ${o.kws.map(k => KW_ES[k] || k).join(', ')}`, l15SWR: () => 'Robar dos (con el coste adicional: barajar el cementerio, robar siete, sin máximo de mano)',
+  l15Yang: () => 'Cada jugador elige hasta un permanente de valor 3+ de tus oponentes: se exilian', l15Yang2: () => 'Puedes hacer que un oponente robe tres para robar tres', l15Free: o => `Lanzar gratis un hechizo${o.f === 'noncreature' ? ' que no sea criatura' : ''} de tu mano${o.mvCnt ? ' (valor X o menos)' : ''}`,
+  l15LookCast: o => `Mirar ${o.n}: puedes lanzar una gratis`, l15Solstice: () => 'Exiliar hasta una no tierra; lanzarla gratis si su valor es menor que tus Montañas, si no a la mano', l15Hidden: () => 'Jugar gratis la carta escondida si un oponente recibió 7+ de daño', l15Tamper: () => 'Moler tres; con 20+ en el cementerio, jugar gratis la carta escondida',
+  l15Eladamri: () => 'Revelar una carta de tu mano o la de arriba: si es criatura, al campo', l15MaralenEx: () => 'Exiliar las dos de arriba de un oponente', l15AzulaEx: () => 'Un oponente exilia una criatura y una carta de su cementerio', l15KeepTwo: () => 'Elegir hasta dos criaturas y destruir el resto',
+  l15DigX: () => 'Mirar X: puedes coger un artefacto', l15Celestine: () => 'Devolver una criatura de valor ≤ vida ganada este turno', l15TokX: o => o.treasure ? 'Crear X Tesoros' : `Crear X fichas de ${o.spec.name}`, l15NoInd: () => 'Los permanentes de los oponentes pierden indestructible', l15WipeNL: () => 'Destruir todos los permanentes no tierra',
+  l15ClueAmt: () => 'Investigar tantas veces como daño', l15Fleet: () => 'Las criaturas elegidas crean un Soldado atacando al atacar', l15Dread: () => '+X/+X (fuerza de la carta exiliada)', l15RetAll: o => `Devolver al campo todas las cartas de ${o.f.join(' y ')} de tu cementerio`, l15ReanCtr: o => `Devolver una criatura con un contador de ${o.kind}`,
+  l15Katherine: () => 'Barajar esta carta y tus seis de arriba y ponerlas encima', l15Excess: o => `${o.n} de daño a una criatura rival; ganas el exceso`, l15Sculpt: () => 'Con un Hechicero: {C} igual al maná gastado en tu próxima fase principal', l15Portent: () => 'Mirar y ordenar las tres de arriba de un jugador', l15PortentDraw: () => 'Robar en el próximo mantenimiento',
+  l15Disorient: () => 'Por cada oponente, hasta un artefacto/encantamiento: su dueño puede exiliarlo; si no, buscas tierras', l15Teach: () => 'Buscar cuatro tierras distintas; un oponente manda dos al cementerio', l15Shigeki: () => 'Revelar cuatro: una tierra al campo girada, el resto al cementerio', l15RegrowX: () => 'Devolver X cartas no legendarias a la mano',
+  l15Destiny: () => 'Moler tanto como su fuerza; esta Aura a la mano y una criatura molida al campo', l15Recruit: o => `Buscar cartas de ${o.f} y ponerlas encima`, l15Druid: () => 'Cada jugador puede elegir un artefacto/encantamiento tuyo no: se destruyen', l15Coup: () => 'Cuatro de energía; puedes pagar su valor para ganar el control',
+  l15Pia: () => 'Pagar energía: Nalaar Aetherjet X/X', l15PumpSacMv: () => '+X/+0 (valor del encantamiento sacrificado)', l15CtrPlayer: () => 'Un contador +1/+1 en cada criatura de un jugador', l15Pain: o => `${o.n} de daño a otro jugador`, l15Rona: () => 'El controlador de la fuente exilia una carta al azar: puedes jugarla'
 });
 </script>
 
