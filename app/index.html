@@ -16524,6 +16524,514 @@ Object.assign(XTEXT, {
   l13Hulk: () => 'Si es más grande, contador +1/+1 aquí', l13GainTou: () => 'Ganar vidas igual a su resistencia', l13SelfAmt: () => 'Tantos contadores +1/+1 como daño', l13ItToHand: () => 'Devolver esa carta a la mano', l13CtrN: o => `${o.n} contadores +1/+1`,
   l13Explore: () => 'Esa criatura explora', l13AttachIt: () => 'Puedes anexar este Equipo a esa criatura'
 });
+/* =====================================================================
+   Tanda 14 (the decks of Picón CD: the «easy» cards).
+   · Energy as a cost: «pay {E}{E}», «pay six {E}» in activated abilities; «you get six {E}», «you get that many
+     {E}», «you get an amount of {E} equal to …».
+   · Mana with extra costs: «{T}, pay 1 life: add {G} or {U}», «{T}, pay {E}: add one mana of any color»,
+     «sacrifice a creature/Goblin: add …» (the last two are abilities that put mana in your pool; bots don't use them).
+   · Activated abilities that were «by hand»: Krenko, Academy Ruins / Hall of Heliod's Generosity, Aetheric
+     Amplifier, Dragonspark Reactor, Akiri, Fabled Passage, Pyre of Heroes, Fauna Shaman, Lathril, Prime Speaker
+     Vannifar, Quirion Ranger, Tyvar, Hobgoblin Bandit Lord, Magda, Devoted Druid, Llanowar Mentor, War Room, Multani.
+   · Triggers: a player sacrifices / casts a nonblack spell / casts their second spell, an artifact or enchantment you
+     control is put into a graveyard, a token leaves, equipped creature dies, a creature becomes blocked, one or more
+     Goblins attack, you attack a player, each upkeep, equipped creature deals combat damage, and more.
+   · Spells and effects: «until end of turn, …», destroy all nontoken creatures, X = number of …, raid «instead»,
+     morbid «instead», airbend several targets, untap all lands, regenerate each creature, and more.
+   ===================================================================== */
+const l14Src = ctx => ctx && ctx.src ? (G.cards[ctx.src.id] || ctx.src) : null;
+const l14Opps = s => oppsOf(s).filter(alive);
+const l14Energy = s => pctr(G.p[s]).energy || 0;
+function l14PayE(s, n) { const p = pctr(G.p[s]); if ((p.energy || 0) < n) return false; p.energy -= n; log(`${pn(s)} paga ${n} de energía (le queda${p.energy === 1 ? '' : 'n'} ${p.energy}).`); return true; }
+function l14GetE(s, n) { if (!(n > 0)) return; applyOp({ k: 'pctr', type: 'energy', n, who: 'you' }, { seat: s }, null); }
+const l14IsType = (c, w) => !!c && (fxIs(c, [w]) || creTypes(D(c)).map(z => z.toLowerCase()).includes(w));
+const l14Attached = c => permsAll().filter(x => x.att === c.id);
+const l14MaxPow = s => Math.max(0, ...permsOf(s).filter(isCreature).map(P));
+const l14Lands = s => permsOf(s).filter(isLand).length;
+const l14CmdColors = s => { const set = new Set(); for (const c of Object.values(G.cards)) if (c && c.owner === s && c.isCmd) for (const k of (D(c).ci || D(c).colors || [])) set.add(k); return set.size; };
+function l14Amt(w, ctx) {
+  const s = ctx.seat; const src = l14Src(ctx);
+  switch (w) {
+    case 'creaturesAll': return permsAll().filter(isCreature).length;
+    case 'creatures': return permsOf(s).filter(isCreature).length;
+    case 'goblins': return permsOf(s).filter(c => l14IsType(c, 'goblin')).length;
+    case 'dwarves': return permsOf(s).filter(c => l14IsType(c, 'dwarf')).length;
+    case 'equipment': return permsOf(s).filter(c => isType(c, 'equipment')).length;
+    case 'otherAtk': return permsAll().filter(c => c.atk != null && c.ctl === s && isCreature(c) && (!src || c.id !== src.id)).length;
+    case 'srcPow': return src && src.zone === 'bf' ? Math.max(0, P(src)) : 0;
+    case 'goblinsIn': { const p = G.p[s]; return p.l14GobT === G.turnsTaken ? (p.l14GobN || 0) : 0; }
+    case 'maxPow': return l14MaxPow(s);
+  }
+  return 0;
+}
+const L14_CNT = { 'the number of creatures on the battlefield': 'creaturesAll', 'the number of creatures you control': 'creatures', 'the number of goblins you control': 'goblins', 'the number of dwarves you control': 'dwarves', 'the number of equipment you control': 'equipment', 'the number of other attacking creatures': 'otherAtk', 'its power': 'srcPow', '~\'s power': 'srcPow', 'the number of goblins that entered the battlefield under your control this turn': 'goblinsIn', 'the greatest power among creatures you control': 'maxPow' };
+
+/* ---------- bookkeeping ---------- */
+// Goblins that entered under your control this turn (Hobgoblin Bandit Lord)
+{ const _oe14 = onEnter; onEnter = function (c) {
+  try {
+    if (G && c && c.zone === 'bf') {
+      if (l14IsType(c, 'goblin')) { const p = G.p[c.ctl]; if (p) { if (p.l14GobT !== G.turnsTaken) { p.l14GobT = G.turnsTaken; p.l14GobN = 0; } p.l14GobN++; } }
+      const a = AB(c);
+      if (!c.tapped && a.l14TapOpp8 && l14Opps(c.ctl).reduce((n, o) => n + l14Lands(o), 0) < 8) { c.tapped = true; log(`${cn(c)} entra girada.`); }
+      if (!c.tapped && a.l14TapMtn && permsOf(c.ctl).filter(x => x !== c && l14IsType(x, 'mountain')).length < a.l14TapMtn) { c.tapped = true; log(`${cn(c)} entra girada.`); }
+    }
+  } catch (e) { console.error(e); }
+  return _oe14.apply(this, arguments);
+}; }
+// what was attached to a permanent when it left (Skullclamp, Koll) and the last sacrificed card (Pyre of Heroes)
+{ const _mc14 = moveCard; moveCard = function (c, to) {
+  let wasGy = false;
+  try { if (G && c && c.zone === 'bf' && to !== 'bf') c._l14Att = l14Attached(c).map(x => ({ id: x.id, aura: isType(x, 'aura'), eq: isType(x, 'equipment') })); wasGy = !!(c && c.zone !== 'gy' && to === 'gy'); } catch (e) { console.error(e); }
+  const r = _mc14.apply(this, arguments);
+  try { if (G && wasGy && c.zone === 'gy' && !c.token && abOf(D(c)).l14Spine) setTimeout0(() => { if (c.zone !== 'gy') return; moveCard(c, 'lib'); shuffle(G.p[c.owner].lib); log(`${cn(c)} se baraja en la biblioteca de ${pn(c.owner)}.`); }); } catch (e) { console.error(e); }
+  return r;
+}; }
+{ const _sac14 = sacrifice; sacrifice = function (c) { try { if (G && c && c.zone === 'bf') G.l14LastSac = { id: c.id, types: creTypes(D(c)).map(z => z.toLowerCase()), mv: D(c).cmc || 0, cre: isCreature(c), changeling: abOf(D(c)).kw.has('changeling') }; } catch (e) { console.error(e); } return _sac14.apply(this, arguments); }; }
+// you attacked this turn (raid); attack triggers that look at all the attackers
+{ const _fa14 = fxAttackers; fxAttackers = function (s, attacks, byDef) {
+  const r = _fa14.apply(this, arguments);
+  try {
+    if (attacks.length) G.p[s].l14AtkT = G.turnsTaken;
+    const atk = attacks.map(a => G.cards[a.id]).filter(c => c && c.zone === 'bf');
+    for (const x of permsOf(s)) {
+      const a = AB(x);
+      if (a.l14Kreat && atk.some(c => l14IsType(c, 'goblin'))) trigger(x, [{ k: 'l14AtkTok', spec: { name: 'Goblin', p: 1, t: 1, colors: ['R'], type: 'Token Creature — Goblin' }, to: G.fxAtkDef }]);
+      if (a.l14Light) { const pls = [...new Set(attacks.map(q => q.to).filter(q => typeof q === 'number' && G.p[q]))]; for (const o of pls) trigger(x, [{ k: 'l14AtkTok', spec: { name: 'Glimmer', p: 1, t: 1, colors: ['W'], type: 'Token Enchantment Creature — Glimmer' }, to: o }]); }
+      if (a.l14Shriek && atk.length) { const n = Math.max(0, ...atk.map(P)); if (n) trigger(x, [{ k: 'l14UntapLands', n }]); }
+      if (a.l14Reyav) for (const c of atk) if (c.ctl === s && l14Attached(c).some(y => isType(y, 'aura') || isType(y, 'equipment'))) trigger(x, [{ k: 'l14KwOn', id: c.id, kw: 'double strike' }]);
+    }
+    for (const c of atk) if (AB(c).l14BattleCry) trigger(c, [{ k: 'l14BattleCry' }]);
+  } catch (e) { console.error(e); }
+  return r;
+}; }
+// «Whenever a creature you control becomes blocked» (Close Quarters)
+{ const _lb14 = lotrBlocks; lotrBlocks = function (blocks) {
+  const r = _lb14.apply(this, arguments);
+  try { const seen = new Set(); for (const a of Object.values(blocks)) { const c = G.cards[a]; if (!c || seen.has(c.id)) continue; seen.add(c.id); for (const x of permsOf(c.ctl)) if (AB(x).l14Blocked) trigger(x, [{ k: 'dmg', n: 1, f: 'any target' }]); } } catch (e) { console.error(e); }
+  return r;
+}; }
+// combat damage: «whenever equipped creature deals combat damage» (Umezawa's Jitte), «whenever one or more artifact
+// creatures you control deal combat damage to a player» (Thopter Spy Network)
+{ const _cd14 = combatDamage; combatDamage = function (attacks, blocks, blockedBy, first) {
+  const before = new Map(); try { for (const c of permsAll()) if (isCreature(c)) before.set(c.id, c.dmg || 0); G.l14Hit = []; } catch (e) { console.error(e); }
+  const r = _cd14.apply(this, arguments);
+  try {
+    const hit = G.l14Hit || []; G.l14Hit = null;
+    const dealt = new Set(hit.map(h => h.src));
+    // creatures that dealt combat damage to creatures: those whose blocked/blocking partner got damage
+    for (const [b, a] of Object.entries(blocks || {})) { const bc = G.cards[b], ac = G.cards[a]; if (!bc || !ac) continue; const db = (bc.dmg || 0) - (before.get(bc.id) || 0), da = (ac.dmg || 0) - (before.get(ac.id) || 0); if (db > 0 || (bc.zone !== 'bf' && before.has(bc.id))) dealt.add(ac.id); if (da > 0 || (ac.zone !== 'bf' && before.has(ac.id))) dealt.add(bc.id); }
+    for (const x of permsAll()) { if (AB(x).l14Jitte && x.att != null && dealt.has(x.att)) trigger(x, [{ k: 'l14Charge', n: 2 }]); }
+    const bySeat = new Map(); for (const h of hit) { const c = G.cards[h.src]; if (c && isCreature(c) && isType(c, 'artifact')) bySeat.set(c.ctl, true); }
+    for (const [s] of bySeat) for (const x of permsOf(s)) if (AB(x).l14SpyNet) trigger(x, [{ k: 'draw', n: 1 }]);
+  } catch (e) { console.error(e); }
+  return r;
+}; }
+{ const _dp14 = damagePlayer; damagePlayer = function (s, n, src) { try { if (G && G.l14Hit && src && src.id != null && n > 0) G.l14Hit.push({ src: src.id, pl: s, n }); } catch (e) { console.error(e); } return _dp14.apply(this, arguments); }; }
+// «at the beginning of each upkeep» / «each player's upkeep» (Midnight Clock, Ruthless Winnower)
+{ const _bt14 = beginTurn; beginTurn = function (s) {
+  const r = _bt14.apply(this, arguments);
+  try { for (const x of permsAll()) { const a = AB(x); if (a.l14EachUpk) trigger(x, a.l14EachUpk, { that: s }); } } catch (e) { console.error(e); }
+  return r;
+}; }
+// Goldspan Dragon: Treasures you control make two mana
+{ const _ma14 = manaAmt; manaAmt = function (c) { const n = _ma14.apply(this, arguments); try { if (G && c && c.zone === 'bf' && /\btreasure\b/i.test(D(c).type_line || '') && permsOf(c.ctl).some(x => AB(x).l14Gold)) return Math.max(n, 2); } catch (e) { console.error(e); } return n; }; }
+// static +X/+X that depend on what you control (Thorin, King of Durin's Folk; Koll; Nettlecyst)
+{ const _rm14 = recomputeMods; recomputeMods = function () {
+  const r = _rm14.apply(this, arguments);
+  try {
+    if (!G) return r;
+    const M = c => c.mods || (c.mods = newMods());
+    for (const x of permsAll()) {
+      const a = AB(x);
+      if (a.l14Thorin) { const n = permsOf(x.ctl).filter(c => c.token && isType(c, 'artifact')).length; if (n) for (const c of permsOf(x.ctl)) if (c !== x && isCreature(c) && l14IsType(c, 'dwarf')) M(c).p += n; }
+      if (a.l14KollTok) for (const c of permsOf(x.ctl)) if (c.token && isCreature(c) && l14Attached(c).some(y => isType(y, 'aura') || isType(y, 'equipment'))) { M(c).p += 1; M(c).t += 1; }
+      if (a.l14PerArtEnch && x.att != null) { const h = G.cards[x.att]; if (h && h.zone === 'bf') { const n = permsOf(x.ctl).filter(c => isType(c, 'artifact') || isType(c, 'enchantment')).length; M(h).p += n; M(h).t += n; } }
+    }
+  } catch (e) { console.error(e); }
+  return r;
+}; }
+// amounts that depend on what you control, for the existing damage ops
+{ const _dn14 = x26DmgN; x26DmgN = function (op, ctx) { if (op && op.l14n) return op.l14n === 'raid' ? (G.p[ctx.seat].l14AtkT === G.turnsTaken ? op.raid : op.n) : l14Amt(op.l14n, ctx); return _dn14.apply(this, arguments); }; }
+{ const _de14 = XOPS.x26DmgEachOpp; XOPS.x26DmgEachOpp = function (op, ctx) { if (op && op.l14n) op = Object.assign({}, op, { n: l14Amt(op.l14n, ctx) }); return _de14.call(this, op, ctx); }; }
+
+/* ---------- activated-ability costs: energy, a -1/-1 counter on ~, returning lands, discarding a creature card ---------- */
+X26_COST.unshift(
+  [/^pay (?:((?:\{e\})+)|(one|two|three|four|five|six|seven|eight|nine|ten) \{e\})$/, m => ({ k: 'energy', n: m[1] ? m[1].length / 3 : x26N(m[2]) })],
+  [/^put a -1\/-1 counter on ~$/, () => ({ k: 'm1Self' })],
+  [/^return (an?|one|two) ([a-z]+?)s? you control to (?:its|their) owner's hand$/, m => ({ k: 'bounceF', n: x26N(m[1]), f: m[2] })],
+  [/^discard a creature card$/, () => ({ k: 'discF', f: 'creature' })],
+  [/^tap (five|six|seven|eight|nine|ten) untapped ([a-z]+?)s? you control$/, m => ({ k: 'tapN', n: x26N(m[1]), f: m[2] === 'elve' ? 'elf' : m[2], other: false })],
+  [/^sacrifice (five|six|seven) ([a-z]+?)s$/, m => ({ k: 'sacN', n: x26N(m[1]), f: m[2] })],
+  [/^pay life equal to the number of colors in your commanders' color identity$/, () => ({ k: 'lifeId' })]
+);
+{ const _lb = x26XcLabel; x26XcLabel = function (x) {
+  if (x.k === 'energy') return `pagar ${x.n} de energía`;
+  if (x.k === 'm1Self') return 'ponerle un contador -1/-1';
+  if (x.k === 'bounceF') return `devolver ${x.n > 1 ? x.n + ' ' : 'un '}${x.f === 'land' ? 'tierra' : x.f}${x.n > 1 ? 's' : ''} tuya${x.n > 1 ? 's' : ''} a la mano`;
+  if (x.k === 'discF' && x.f === 'creature') return 'descartar una carta de criatura';
+  if (x.k === 'lifeId') return 'pagar vidas igual a los colores de la identidad de tu comandante';
+  return _lb.apply(this, arguments);
+}; }
+{ const _ls = x26XcList; x26XcList = function (x, s, c) {
+  if (x.k === 'bounceF') return permsOf(s).filter(y => x.f === 'land' ? isLand(y) : l14IsType(y, x.f));
+  if (x.k === 'discF' && x.f === 'creature') return G.p[s].hand.map(id => G.cards[id]).filter(y => y !== c && /\bcreature\b/i.test(D(y).type_line || ''));
+  if (x.k === 'tapN' && x.f === 'elf') return permsOf(s).filter(y => !y.tapped && isCreature(y) && l14IsType(y, 'elf'));
+  return _ls.apply(this, arguments);
+}; }
+{ const _ck = x26XcCheck; x26XcCheck = function (act, c, s) {
+  for (const x of act.xc || []) {
+    if (x.k === 'energy' && l14Energy(s) < x.n) return `Necesitas ${x.n} de energía (tienes ${l14Energy(s)}).`;
+    if (x.k === 'bounceF' && x26XcList(x, s, c).length < x.n) return `No puedes pagar el coste: ${x26XcLabel(x)}.`;
+    if (x.k === 'lifeId' && G.p[s].life < l14CmdColors(s)) return 'No tienes vidas suficientes.';
+    if (x.k === 'm1Self' && !(c && c.zone === 'bf')) return 'No está en el campo.';
+  }
+  return _ck.apply(this, arguments);
+}; }
+function l14XcExtra(x, ys, c, s) {
+  switch (x.k) {
+    case 'energy': l14PayE(s, x.n); break;
+    case 'm1Self': if (c && c.zone === 'bf') { addCounters(c, 1, 'm1', true); log(`${cn(c)} recibe un contador -1/-1.`); } break;
+    case 'bounceF': for (const y of ys) { moveCard(y, 'hand'); log(`${cn(y)} vuelve a la mano de ${pn(y.owner)}.`); } break;
+    case 'lifeId': { const n = l14CmdColors(s); if (n) loseLife(s, n); break; }
+  }
+}
+{ const _pb = x26XcPayBot; x26XcPayBot = function (act, c, s) {
+  const r = _pb.apply(this, arguments);
+  for (const x of act.xc || []) { if (x.k === 'bounceF') l14XcExtra(x, x26XcList(x, s, c).sort((a, b) => (a.tapped ? -1 : 0) - (b.tapped ? -1 : 0) || value(a) - value(b)).slice(0, x.n), c, s); else l14XcExtra(x, [], c, s); }
+  return r;
+}; }
+{ const _ph = x26XcPayHuman; x26XcPayHuman = async function (act, c) {
+  const plan = __R(ME, G, await _ph.apply(this, arguments)); if (!plan) return plan;
+  for (const p of plan) if (p[0].k === 'bounceF') { const lst = x26XcList(p[0], ME, c); const got = []; for (let i = 0; i < p[0].n; i++) { const rest = lst.filter(y => !got.includes(y)); const y = rest.length === 1 && p[0].n - i === 1 ? rest[0] : __R(ME, G, await pickFromList(rest, `${x26XcLabel(p[0])} (${i + 1} de ${p[0].n})`)); if (!y) return null; got.push(y); } p[1] = got; }
+  return plan;
+}; }
+{ const _ap = x26XcApply; x26XcApply = function (plan, act, c, s) { const r = _ap.apply(this, arguments); for (const [x, ys] of plan) l14XcExtra(x, ys, c, s); return r; }; }
+
+/* ---------- lines ---------- */
+const L14_ANY5 = ['W', 'U', 'B', 'R', 'G'];
+function l14ManaAct(text, extra, cols) { return x26PlainAct(Object.assign({ x26c: {}, x26key: ++X26_ACTKEY, x26NoBot: true, ops: [{ k: 'x26Mana', n: 1, cols }], text }, extra)); }
+const l14Flag = (a, k, v = true) => { a[k] = v; return x26Trig(a, { ev: 'l14flag' }); };
+function l14Line(a, l) {
+  let m; const t = l.replace(/\s+\./g, '.').replace(/\s{2,}/g, ' ').replace(/\.$/, '').trim();
+  // statics
+  if ((m = t.match(/^[a-z][a-z' ,-]{2,30} — (other )?creatures you control get \+(\d+)\/\+(\d+)(?: and have ([a-z, ]+))?$/))) { const kw = m[4] ? kwList(m[4]) : []; if (m[4] && kw.join(' and ') !== m[4].replace(/,? and |, /g, ' and ')) return false; a.anthems.push({ p: +m[2], t: +m[3], other: !!m[1], f: null, kw }); return true; }
+  if ((m = t.match(/^([a-z ]+); ([a-z ]+)$/)) && KW_LIST.includes(m[1]) && KW_LIST.includes(m[2])) { a.kw.add(m[1]); a.kw.add(m[2]); return true; }
+  if (t === 'treasures you control have "{t}, sacrifice ~: add two mana of any one color."') return l14Flag(a, 'l14Gold');
+  if (t === '~ enters tapped unless your opponents control eight or more lands') return l14Flag(a, 'l14TapOpp8');
+  if ((m = t.match(/^~ enters tapped unless you control (two|three|four) or more other mountains$/))) return l14Flag(a, 'l14TapMtn', num(m[1]));
+  if (t === 'other dwarves you control get +1/+0 for each artifact token you control') return l14Flag(a, 'l14Thorin');
+  if (t === 'creature tokens you control that are enchanted or equipped get +1/+1') return l14Flag(a, 'l14KollTok');
+  if (t === 'equipped creature gets +1/+1 for each artifact and/or enchantment you control') return l14Flag(a, 'l14PerArtEnch');
+  if (t === 'living weapon') { a.etb.push({ k: 'l14Germ' }); return true; }
+  if (t === 'battle cry') return l14Flag(a, 'l14BattleCry');
+  if (t === 'partner') { a.l14Partner = true; return true; }
+  // mana with extra costs
+  if ((m = t.match(/^\{t\}, pay (\d+) life: add \{([wubrgc])\} or \{([wubrgc])\}$/))) { a.mana = { cols: [m[2].toUpperCase(), m[3].toUpperCase()], amt: 1, sac: false, life: +m[1] }; return true; }
+  if (t === '{t}, pay {e}: add one mana of any color') { a.acts.push(l14ManaAct(l, { tap: true, xc: [{ k: 'energy', n: 1 }] }, L14_ANY5)); return true; }
+  if (t === 'sacrifice a creature: add one mana of any color') { a.acts.push(l14ManaAct(l, { xc: [{ k: 'sacF', f: 'creature', other: false }] }, L14_ANY5)); return true; }
+  if ((m = t.match(/^sacrifice an? ([a-z]+): add \{([wubrgc])\}$/)) && m[1] !== 'creature') { a.acts.push(l14ManaAct(l, { xc: [{ k: 'sacN', n: 1, f: m[1] }] }, [m[2].toUpperCase()])); return true; }
+  // activated abilities with special shapes
+  if (t === 'pay {e}{e}{e}{e}: return ~ to its owner\'s hand') { a.acts.push(x26PlainAct({ xc: [{ k: 'energy', n: 4 }], x26c: {}, x26key: ++X26_ACTKEY, ops: [{ k: 'l14SelfBounce' }], text: l })); return true; }
+  if ((m = t.match(/^((?:\{[^}]+\})+), \{t\}: choose one\. activate only as a sorcery$/))) { const pc = parseCost(m[1]); const md = { n: 1, must: true, any: false, modes: [] }; a.acts.push({ generic: pc.generic, pips: pc.pips, tap: true, sac: false, sacOther: null, life: 0, ops: [{ k: 'mode', md }], cond: { sorcery: true }, text: l }); a._pm = md; return true; }
+  if ((m = t.match(/^((?:\{[^}]+\})+), return two lands you control to their owner's hand: return ~ from your graveyard to your hand$/))) { const pc = parseCost(m[1]); a.gyActs.push({ generic: pc.generic, pips: pc.pips, ops: [{ k: 'x26ReturnSelfGy', to: 'hand', tapped: false, finality: false, ctr: 0 }], text: l, keep: true, xc: [{ k: 'bounceF', n: 2, f: 'land' }], x26cond: {}, label: 'Volver a la mano desde el cementerio' }); return true; }
+  if ((m = t.match(/^((?:\{[^}]+\}, )*\{t\}, discard a card): (create .+? token named [a-z ]+\. it has "\{t\}: add \{[wubrg]\}\.?")$/))) { const base = parseAct(m[1] + ': draw a card', l); const ops = parseEffects(m[2]); if (!base || ops.length !== 1) return false; base.ops = ops; base.text = l; a.acts.push(base); return true; }
+  // triggers
+  if (/^whenever ~ attacks, blocks, or becomes the target of a spell, (?:it|~) deals damage equal to its power to each opponent$/.test(t)) { const op = { k: 'x26DmgEachOpp', n: 0, l14n: 'srcPow' }; a.attack.push(op); (a.fxBlockOps ||= []).push(op); a.onTargeted = { selfOnly: true, spellOnly: true, ops: [op] }; return true; }
+  if ((m = t.match(/^whenever ~ attacks, (?:it|~) gains ([a-z ]+) until end of turn$/)) && kwList(m[1]).join(' and ') === m[1]) { a.attack.push({ k: 'selfPump', p: 0, t: 0, kws: kwList(m[1]), kw: kwList(m[1])[0] }); return true; }
+  if (/^whenever a player sacrifices a permanent, ~ deals 1 damage to any target$/.test(t)) return x26Trig(a, { ev: 'sac', run: x => trigger(x, [{ k: 'dmg', n: 1, f: 'any target' }]) });
+  if (/^whenever a player casts a nonblack spell, that player loses 1 life$/.test(t)) return x26Trig(a, { ev: 'cast', run: (x, info) => { if (info.c && !(D(info.c).colors || []).includes('B')) trigger(x, [{ k: 'l14Lose', pl: info.s, n: 1 }]); } });
+  if (/^whenever an opponent casts their second spell each turn, you create a treasure token$/.test(t)) return x26Trig(a, { ev: 'cast', who: 'opp', nthCast: 2, ops: [{ k: 'treasure', n: 1 }] });
+  if ((m = t.match(/^whenever you cast an? ([a-z]+(?:, [a-z]+)*,? or [a-z]+) spell, draw a card$/))) { const types = m[1].split(/,? or |, /); if (!types.every(w => ['aura', 'equipment', 'vehicle', 'artifact', 'enchantment'].includes(w))) return false; return x26Trig(a, { ev: 'cast', who: 'you', spellType: types, ops: [{ k: 'draw', n: 1 }] }); }
+  if (/^whenever another creature or artifact you control is put into a graveyard from the battlefield, each opponent loses 1 life$/.test(t)) return x26Trig(a, { ev: 'x26leave', who: 'you', run: (x, info) => { const c = info.c; if (!c || c.id === x.id || info.intended !== 'gy' || !(info.wasCre || isType(c, 'artifact'))) return; trigger(x, [{ k: 'oppsLose', n: 1 }]); } });
+  if (/^whenever an enchantment you control is put into a graveyard from the battlefield, put a \+1\/\+1 counter on ~$/.test(t)) return x26Trig(a, { ev: 'x26leave', who: 'you', run: (x, info) => { const c = info.c; if (!c || c.id === x.id || info.intended !== 'gy' || !isType(c, 'enchantment')) return; trigger(x, [{ k: 'selfCounters', n: 1 }]); } });
+  if (/^whenever a token you control leaves the battlefield, each opponent loses 1 life and you gain 1 life$/.test(t)) return x26Trig(a, { ev: 'x26leave', who: 'you', run: (x, info) => { if (!info.c || !info.c.token) return; trigger(x, [{ k: 'oppsLose', n: 1 }, { k: 'gain', n: 1 }]); } });
+  if (/^when ~ is put into a graveyard from anywhere, shuffle it into its owner's library$/.test(t)) return l14Flag(a, 'l14Spine');
+  if (/^whenever equipped creature dies, draw two cards$/.test(t)) return x26Trig(a, { ev: 'dies', run: (x, info) => { if (x.zone === 'bf' && info.c && (info.c._l14Att || []).some(y => y.id === x.id)) trigger(x, [{ k: 'draw', n: 2 }]); } });
+  if (/^whenever another nontoken creature you control dies, if it was enchanted or equipped, return it to its owner's hand$/.test(t)) return x26Trig(a, { ev: 'dies', who: 'you', run: (x, info) => { const c = info.c; if (!c || c.id === x.id || c.token || !(c._l14Att || []).some(y => y.aura || y.eq)) return; trigger(x, [{ k: 'l14ToHand', id: c.id }]); } });
+  if (/^whenever a creature you control becomes blocked, ~ deals 1 damage to any target$/.test(t)) return l14Flag(a, 'l14Blocked');
+  if (/^whenever one or more goblins you control attack, create a 1\/1 red goblin creature token that's tapped and attacking$/.test(t)) return l14Flag(a, 'l14Kreat');
+  if (/^whenever you attack a player, create a 1\/1 white glimmer enchantment creature token that's tapped and attacking that player$/.test(t)) return l14Flag(a, 'l14Light');
+  if (/^whenever you attack with one or more creatures, untap up to x lands, where x is the greatest power among those creatures$/.test(t)) return l14Flag(a, 'l14Shriek');
+  if (/^whenever a creature you control that's enchanted or equipped attacks, that creature gains double strike until end of turn$/.test(t)) return l14Flag(a, 'l14Reyav');
+  if ((m = t.match(/^whenever another creature you control with power (\d+) or less enters, ~ gets \+(\d+)\/\+(\d+) until end of turn$/))) { const mx = +m[1], p = +m[2], q = +m[3]; return x26Trig(a, { ev: 'enter', who: 'you', other: true, creature: true, run: (x, info) => { if (info.c && isCreature(info.c) && P(info.c) <= mx) trigger(x, [{ k: 'selfPump', p, t: q }]); } }); }
+  if (/^whenever one or more artifact creatures you control deal combat damage to a player, draw a card$/.test(t)) return l14Flag(a, 'l14SpyNet');
+  if (/^whenever equipped creature deals combat damage, put two charge counters on ~$/.test(t)) return l14Flag(a, 'l14Jitte');
+  if ((m = t.match(/^whenever an? ([a-z]+) you control deals combat damage to a player(?: or battle)?, create two treasure tokens$/))) { a.allyCombatDmg.push({ sub: m[1], ops: [{ k: 'treasure', n: 2 }] }); return true; }
+  if ((m = t.match(/^whenever ~ or another ([a-z]+) you control enters and whenever an? ([a-z]+) you control enters, you may discard a card\. if you do, draw a card$/))) { x26Trig(a, { ev: 'enter', who: 'you', types: [m[1]], self: false, ops: [{ k: 'x26Loot' }] }); return x26Trig(a, { ev: 'enter', who: 'you', types: [m[2]], ops: [{ k: 'x26Loot' }] }); }
+  if ((m = t.match(/^whenever an? ([a-z]+) you control becomes tapped, create a treasure token$/))) return x26Trig(a, { ev: 'x26tapped', who: 'you', types: [m[1]], ops: [{ k: 'treasure', n: 1 }] });
+  if (/^at the beginning of each upkeep, put an? ([a-z]+) counter on ~$/.test(t)) { const kind = t.match(/put an? ([a-z]+) counter/)[1]; (a.l14EachUpk ||= []).push({ k: 'l14Ctr', kind, n: 1 }); return x26Trig(a, { ev: 'l14flag' }); }
+  if ((m = t.match(/^when the twelfth hour counter is put on ~, shuffle your hand and graveyard into your library, then draw seven cards\. exile ~$/))) return l14Flag(a, 'l14Clock', 12);
+  if ((m = t.match(/^at the beginning of each player's upkeep, that player sacrifices a non-([a-z]+) creature$/))) { (a.l14EachUpk ||= []).push({ k: 'l14SacNon', not: m[1] }); return x26Trig(a, { ev: 'l14flag' }); }
+  if (/^whenever ~ deals combat damage to a player, you get that many \{e\}$/.test(t)) { a.combatDmg.push({ k: 'l14GetE', amt: true }); return true; }
+  return false;
+}
+{ const _el14 = eoeLine; eoeLine = function (a, l, PE) { if (l14Line(a, l)) return true; return _el14(a, l, PE); }; }
+
+/* ---------- sentences ---------- */
+const L14_COLS = { white: 'W', blue: 'U', black: 'B', red: 'R', green: 'G' };
+function l14Sentence(s, pe) {
+  let m;
+  if ((m = s.match(/^until end of turn, creatures you control gain ([a-z ]+) and get \+x\/\+x, where x is (.+)$/)) && L14_CNT[m[2]] && kwList(m[1]).join(' and ') === m[1]) return [{ k: 'l14PumpAllX', cnt: L14_CNT[m[2]], kws: kwList(m[1]) }];
+  if (/^create x 2\/1 red dwarf berserker creature tokens, where x is the number of vehicles you control plus the number of equipment you control\. for each of those tokens, you may attach an equipment you control to it$/.test(s)) return [{ k: 'l14Crew' }];
+  if ((m = s.match(/^until end of turn, (.+)$/)) && !/until end of turn/.test(m[1])) { const r = pe(m[1] + ' until end of turn'); return r.length ? r : null; }
+  if ((m = s.match(/^you get (one|two|three|four|five|six|seven|eight|nine|ten) \{e\}$/))) return [{ k: 'pctr', type: 'energy', n: x26N(m[1]), who: 'you' }];
+  if ((m = s.match(/^you get an amount of \{e\} equal to (.+)$/)) && L14_CNT[m[1]]) return [{ k: 'l14GetE', cnt: L14_CNT[m[1]] }];
+  if (/^you get that many \{e\}$/.test(s)) return [{ k: 'l14GetE', amt: true }];
+  if (/^you get \{e\} for each creature you control$/.test(s)) return [{ k: 'l14GetE', cnt: 'creatures' }];
+  if ((m = s.match(/^create x (.+? tokens?), where x is (.+)$/)) && L14_CNT[m[2]]) { const tk = pe('create two ' + m[1]); if (tk.length !== 1 || !['tokens', 'x26Tok'].includes(tk[0].k)) return null; return [{ k: 'l14TokX', tok: tk[0], cnt: L14_CNT[m[2]] }]; }
+  if ((m = s.match(/^~ deals damage to target creature equal to (.+)$/)) && L14_CNT[m[1]]) return [{ k: 'x26Dmg', n: 0, tg: 'cre', harm: true, l14n: L14_CNT[m[1]] }];
+  if ((m = s.match(/^~ deals damage equal to (.+) to any target$/)) && L14_CNT[m[1]]) return [{ k: 'x26Dmg', n: 0, tg: 'any', harm: true, l14n: L14_CNT[m[1]] }];
+  if ((m = s.match(/^(?:he|she|it|~) deals damage equal to (.+) to each opponent$/)) && L14_CNT[m[1]]) return [{ k: 'x26DmgEachOpp', n: 0, l14n: L14_CNT[m[1]] }];
+  if ((m = s.match(/^each opponent loses x life, where x is (.+)$/)) && L14_CNT[m[1]]) return [{ k: 'l14OppsLoseX', cnt: L14_CNT[m[1]] }];
+  if ((m = s.match(/^creatures you control get \+x\/\+x until end of turn, where x is (.+)$/)) && L14_CNT[m[1]]) return [{ k: 'l14PumpAllX', cnt: L14_CNT[m[1]], kws: [] }];
+  if ((m = s.match(/^creatures you control gain ([a-z ]+) and get \+x\/\+x until end of turn, where x is (.+)$/)) && L14_CNT[m[2]] && kwList(m[1]).join(' and ') === m[1]) return [{ k: 'l14PumpAllX', cnt: L14_CNT[m[2]], kws: kwList(m[1]) }];
+  if ((m = s.match(/^~ deals (\d+) damage to target creature\. ~ deals (\d+) damage instead if you attacked this turn$/))) return [{ k: 'x26Dmg', n: +m[1], raid: +m[2], tg: 'cre', harm: true, l14n: 'raid' }];
+  if ((m = s.match(/^~ deals x damage to target creature\. if x is (\d+) or more, scry (\d+)$/))) return [{ k: 'x26Dmg', n: 'x', tg: 'cre', harm: true }, { k: 'l14ScryIfX', min: +m[1], n: +m[2] }];
+  if ((m = s.match(/^target creature gets -(\d+)\/-(\d+) until end of turn\. that creature gets -(\d+)\/-(\d+) until end of turn instead if a creature died this turn$/))) return [{ k: 'l14Slip', a: [+m[1], +m[2]], b: [+m[3], +m[4]] }];
+  if ((m = s.match(/^create x (\d+)\/(\d+) (white|blue|black|red|green) ([a-z]+) creature tokens\. if x is (\d+) or more, destroy all other creatures$/))) return [{ k: 'l14Coup', spec: { name: l13Cap(m[4]), p: +m[1], t: +m[2], colors: [L14_COLS[m[3]]], type: 'Token Creature — ' + l13Cap(m[4]) }, min: +m[5] }];
+  if (/^destroy all nontoken creatures$/.test(s)) return [{ k: 'l14WipeNT' }];
+  if (/^untap all lands you control$/.test(s)) return [{ k: 'l14UntapLands', n: 999 }];
+  if (/^regenerate each creature you control$/.test(s)) return [{ k: 'l14RegenAll' }];
+  if (/^if target player has exactly (\d+) life, ~ deals (\d+) damage to that player$/.test(s)) { const q = s.match(/(\d+) life, ~ deals (\d+)/); return [{ k: 'l14Rite', life: +q[1], n: +q[2] }]; }
+  if (/^target creature you control gains indestructible until end of turn\. draw a card if that creature has a \+1\/\+1 counter on it$/.test(s)) return [{ k: 'l14Hunger' }];
+  if ((m = s.match(/^choose a creature type\. creatures you control of the chosen type get \+(\d+)\/\+(\d+) and gain ([a-z ]+) until end of turn$/)) && kwList(m[3]).join(' and ') === m[3]) return [{ k: 'l14TypePump', p: +m[1], t: +m[2], kws: kwList(m[3]) }];
+  if (/^destroy target artifact\. if its mana value was 1 or less, draw a card$/.test(s)) return [{ k: 'l14Raze' }];
+  if ((m = s.match(/^~ deals (\d+) damage to each of up to (two|three) target creatures\. those creatures can't block this turn$/))) return [{ k: 'l14Gambit', n: num(m[2]), dmg: +m[1] }];
+  if ((m = s.match(/^creatures target player controls can't block this turn\. ~ deals (\d+) damage to each (white|blue|black|red|green) and\/or (white|blue|black|red|green) creature that player controls$/))) return [{ k: 'l14Gale', n: +m[1], cols: [L14_COLS[m[2]], L14_COLS[m[3]]] }];
+  if (/^draw cards equal to the greatest mana value among artifacts you control$/.test(s)) return [{ k: 'l14DrawArtMv' }];
+  if ((m = s.match(/^destroy each nonland permanent with mana value (\d+) or less\. add \{([bgwur])\} or \{([bgwur])\} for each permanent destroyed this way$/))) return [{ k: 'l14Culling', mv: +m[1], cols: [m[2].toUpperCase(), m[3].toUpperCase()] }];
+  if (/^search your library for a basic land card, put that card onto the battlefield tapped, then shuffle\. then if there are three or more basic land types among lands you control, scry 1$/.test(s)) return [{ k: 'ramp', n: 1, types: ['land'], basic: true, what: 'basic', dest: 'bf', tapped: true }, { k: 'l14FestScry' }];
+  if (/^search your library for a basic land card, put it onto the battlefield tapped, then shuffle\. then if you control four or more lands, untap that land$/.test(s)) return [{ k: 'l14Fabled' }];
+  if ((m = s.match(/^airbend (any number of|up to (two|three)) (other )?target (nonland permanents|creatures)( you control)?$/))) return [{ k: 'l14AirMany', n: m[2] ? num(m[2]) : 99, other: !!m[3], f: m[4] === 'creatures' ? 'creature' : 'nonland permanent', mine: !!m[5] }];
+  // triggers' effects
+  if (/^put a -1\/-1 counter on (?:it|~)$/.test(s)) return [{ k: 'l14M1Src' }];
+  if ((m = s.match(/^discard (two|three) cards, then draw (two|three) cards$/))) return [{ k: 'selfDiscard', n: num(m[1]) }, { k: 'draw', n: num(m[2]) }];
+  if ((m = s.match(/^target player draws (a card|two cards|three cards), then discards a card$/))) return [{ k: 'l14TgtLoot', n: m[1] === 'a card' ? 1 : num(m[1].split(' ')[0]) }];
+  if (/^if you control a red permanent, you may have ~ deal 1 damage to that player$/.test(s)) return [{ k: 'l14Kederekt' }];
+  if (/^you may search your library for up to that many land cards, put them onto the battlefield tapped, then shuffle$/.test(s)) return [{ k: 'l14LandsAmt' }];
+  if ((m = s.match(/^reveal the top (\w+) cards of your library\. put all ([a-z]+) cards revealed this way into your hand and the rest on the bottom of your library in any order$/)) && num(m[1]) > 0) return [{ k: 'l14RevAll', n: num(m[1]), f: m[2], to: 'hand' }];
+  if ((m = s.match(/^reveal the top (\w+) cards of your library\. put all ([a-z]+) creature cards with mana value (\d+) or less from among them onto the battlefield and the rest on the bottom of your library in a random order$/)) && num(m[1]) > 0) return [{ k: 'l14RevAll', n: num(m[1]), f: m[2], cre: true, mv: +m[3], to: 'bf' }];
+  if ((m = s.match(/^(?:it|~) gets \+1\/\+1 until end of turn for each other ([a-z]+) you control$/))) return [{ k: 'l14PumpPerOther', f: FX_SING(m[1]) }];
+  if ((m = s.match(/^you may search your library for an? ([a-z]+) card, reveal that card, put it into your hand, then shuffle$/))) return [{ k: 'tutor', f: m[1], reveal: true }];
+  if ((m = s.match(/^(?:you may )?search your library for an? ([a-z]+(?: or [a-z]+)?) card(?: with mana value (\d+) or less)?, put (?:it|that card) onto the battlefield, then shuffle$/))) return [{ k: 'l14TutorBf', f: m[1], mv: m[2] ? +m[2] : null }];
+  if ((m = s.match(/^destroy target attacking creature\. if that creature is an? ([a-z]+), exile it instead$/))) return [{ k: 'l14Paragon', sub: m[1] }];
+  if (/^create a 2\/2 white astartes warrior creature token with vigilance that's attacking\. then attacking creatures gain menace until end of turn$/.test(s)) return [{ k: 'l14Rosette' }];
+  if ((m = s.match(/^attacking creatures you control gain ([a-z ]+) until end of turn$/)) && kwList(m[1]).join(' and ') === m[1]) return [{ k: 'l14AtkKw', kws: kwList(m[1]), mine: true }];
+  if ((m = s.match(/^look at the top (\w+) cards of your library\. you may put an aura or equipment card from among them onto the battlefield\. if an equipment is put onto the battlefield this way, you may attach it to a creature you control\. put the rest of those cards on the bottom of your library in a random order$/)) && num(m[1]) > 0) return [{ k: 'l14Skyhunter', n: num(m[1]) }];
+  if (/^target opponent may have you draw three cards\. if the player doesn't, you mill three cards, then ~ deals damage to that player equal to the total mana value of those cards$/.test(s)) return [{ k: 'l14Gearhulk' }];
+  if (/^you may exile target creature you control, then return that card to the battlefield under your control$/.test(s)) return [{ k: 'l14Closet' }];
+  if (/^if you control your commander, create a 1\/1 colorless thopter artifact creature token with flying\. that token gains haste until end of turn$/.test(s)) return [{ k: 'l14Lieut' }];
+  if (/^remove all flood counters from ~\. if no counters were removed this way, put a flood counter on ~ and draw a card\. otherwise, add \{c\}\{g\}\{u\}$/.test(s)) return [{ k: 'l14Luxa' }];
+  if ((m = s.match(/^mill (\w+) cards\. then you may pay \{(\d+)\} and (\d+) life\. if you do, put a card from among those cards into your hand$/))) return [{ k: 'l14Ripples', n: num(m[1]), g: +m[2], life: +m[3] }];
+  if ((m = s.match(/^mill (\w+) cards, then you may exile an? ([a-z]+) card from your graveyard\. if you do, each opponent loses (\d+) life$/))) return [{ k: 'mill', who: 'you', n: num(m[1]) }, { k: 'l14ExileTypeDrain', f: m[2], n: +m[3] }];
+  if ((m = s.match(/^you may pay \{(\d+)\} and (\d+) life\. if you do, draw a card$/))) return [{ k: 'l14PayDraw', g: +m[1], life: +m[2] }];
+  if ((m = s.match(/^remove up to (\w+) counters from target permanent$/))) return [{ k: 'l14RmUpTo', n: num(m[1]) }];
+  if ((m = s.match(/^each opponent blights (\d+)$/))) return [{ k: 'l14OppBlight', n: +m[1] }];
+  if ((m = s.match(/^you get an amount of \{e\} equal to ~'s power\. then you may pay one or more \{e\}\. if you do, put that many \+1\/\+1 counters on ~$/))) return [{ k: 'l14Aetherhood' }];
+  if (/^return all other creatures to their owners' hands$/.test(s)) return [{ k: 'l14BounceOthers' }];
+  if (/^~ becomes an artifact creature until end of turn$/.test(s)) return [{ k: 'crewed' }];
+  if ((m = s.match(/^put two \+1\/\+1 counters on ~\. then draw cards equal to the greatest power among creatures you control$/))) return [{ k: 'selfCounters', n: 2 }, { k: 'draw', n: 0, nX: 'maxPow' }];
+  if ((m = s.match(/^put target (artifact|enchantment|creature) card from your graveyard on top of your library$/))) return [{ k: 'l14GyTop', f: m[1] }];
+  if (/^double the number of each kind of counter on target permanent$/.test(s)) return [{ k: 'l14DblCtr' }];
+  if (/^double the number of each kind of counter you have$/.test(s)) return [{ k: 'l14DblPctr' }];
+  if (/^it deals damage equal to the number of charge counters on it to target player and that much damage to up to one target creature$/.test(s)) return [{ k: 'l14Reactor' }];
+  if (/^you may unattach an equipment from a creature you control\. if you do, tap that creature and it gains indestructible until end of turn$/.test(s)) return [{ k: 'l14Akiri' }];
+  if (/^search your library for a creature card that shares a creature type with the sacrificed creature and has mana value equal to 1 plus that creature's mana value\. put that card onto the battlefield, then shuffle$/.test(s)) return [{ k: 'l14Pyre', share: true }];
+  if (/^search your library for a creature card with mana value equal to 1 plus the sacrificed creature's mana value, put that card onto the battlefield, then shuffle$/.test(s)) return [{ k: 'l14Pyre', share: false }];
+  if ((m = s.match(/^create a 1\/1 (green) ([a-z]+) ([a-z]+) creature token named ([a-z ]+)\. it has "\{t\}: add \{([wubrg])\}\.?"$/))) return [{ k: 'l13Tok', spec: { name: l13Cap(m[4]), p: 1, t: 1, colors: [L14_COLS[m[1]]], type: 'Token Creature — ' + l13Cap(m[2]) + ' ' + l13Cap(m[3]), text: `{T}: Add {${m[5].toUpperCase()}}.` } }];
+  if (/^it gains double strike until end of turn$/.test(s)) return [{ k: 'l14ItKw', kw: 'double strike' }];
+  if ((m = s.match(/^equipped creature gets \+(\d+)\/\+(\d+) until end of turn$/))) return [{ k: 'l14EqPump', p: +m[1], t: +m[2] }];
+  return null;
+}
+{ const _pe14 = parseEffects; parseEffects = function (s) {
+  if (typeof s !== 'string') return _pe14(s);
+  const t = s.replace(/\s+\./g, '.').replace(/\s{2,}/g, ' ').trim().replace(/\.$/, '').trim();
+  const w = l14Sentence(t, _pe14); if (w) return w;
+  const r = _pe14(s);
+  // a text read sentence by sentence when one of its sentences is ours (the older readers may keep only part of it);
+  // if any sentence is not understood, the older reading stays
+  const parts = t.split(/\.\s+/).map(p => p.trim()).filter(Boolean);
+  if (parts.length > 1 && parts.some(p => l14Sentence(p, _pe14))) { const out = []; for (const p of parts) { const o = l14Sentence(p, _pe14) || _pe14(p); if (!o.length) return r; out.push(...o); } return out; }
+  return r;
+}; }
+
+/* ---------- targets ---------- */
+const l14CreOk = (ctx, c, mineOnly) => !!(c && c.zone === 'bf' && isCreature(c) && (!mineOnly || c.ctl === ctx.seat) && !hasKw(c, 'shroud') && (c.ctl === ctx.seat || !hasKw(c, 'hexproof')));
+EOE_TGT.l14Slip = { valid: (op, ctx, x) => l14CreOk(ctx, x && x.card), target: (op, ctx) => { const died = G.p.some(p => p.fxDiedT === G.turnsTaken && p.fxDiedN > 0); const n = died ? op.b[1] : op.a[1]; return bestBy(permsAll().filter(c => c.ctl !== ctx.seat && l14CreOk(ctx, c)), c => value(c) + (toughLeft(c) <= n ? 5 : -5)) || null; } };
+EOE_TGT.l14Hunger = { valid: (op, ctx, x) => l14CreOk(ctx, x && x.card, true), target: (op, ctx) => bestBy(permsOf(ctx.seat).filter(c => l14CreOk(ctx, c, true)), c => value(c) + ((c.cnt.p1 || 0) > 0 ? 3 : 0)) || null };
+EOE_TGT.l14Raze = { valid: (op, ctx, x) => !!(x && x.card && x.card.zone === 'bf' && isType(x.card, 'artifact') && (x.card.ctl === ctx.seat || !hasKw(x.card, 'hexproof'))), target: (op, ctx) => bestBy(permsAll().filter(c => c.ctl !== ctx.seat && isType(c, 'artifact') && !hasKw(c, 'hexproof')), c => value(c) + ((D(c).cmc || 0) <= 1 ? 1 : 0)) || null };
+EOE_TGT.l14Paragon = { valid: (op, ctx, x) => !!(x && x.card && x.card.zone === 'bf' && isCreature(x.card) && x.card.atk != null && l14CreOk(ctx, x.card)), target: (op, ctx) => bestBy(permsAll().filter(c => c.ctl !== ctx.seat && c.atk != null && l14CreOk(ctx, c)), c => value(c)) || null };
+const l14PickRm = { valid: (op, ctx, x) => !!(x && x.card && x.card.zone === 'bf'), target: (op, ctx) => bestBy(permsAll().filter(c => Object.entries(c.cnt || {}).some(([k, v]) => v > 0 && k !== 'loy') || (c.cnt.loy > 0 && c.ctl !== ctx.seat)), c => { const good = (c.cnt.p1 || 0) + (c.cnt.loy || 0) + (c.cnt.charge || 0); const bad = (c.cnt.m1 || 0) + (c.cnt.stun || 0); return c.ctl === ctx.seat ? bad - good : good - bad; }) || null };
+const l14PickDbl = { valid: (op, ctx, x) => !!(x && x.card && x.card.zone === 'bf'), target: (op, ctx) => bestBy(permsOf(ctx.seat).filter(c => Object.values(c.cnt || {}).some(v => v > 0)), c => (c.cnt.p1 || 0) + (c.cnt.loy || 0) + (c.cnt.charge || 0) - (c.cnt.m1 || 0) * 2) || null };
+const l14PickCloset = { valid: (op, ctx, x) => !!(x && x.card && x.card.zone === 'bf' && isCreature(x.card) && x.card.ctl === ctx.seat), target: (op, ctx) => { const c = bestBy(permsOf(ctx.seat).filter(c => isCreature(c) && !c.token && (AB(c).etb.length || (AB(c).fxT || []).some(t => t.ev === 'enter'))), c => value(c)); return c || null; } };
+
+/* ---------- ops ---------- */
+function l14Bottom(list) { const l = list.slice(); shuffle(l); for (const c of l) if (c.zone === 'lib' || c.zone === 'exile') moveCard(c, 'lib', { pos: 'bottom' }); }
+function l14TypeOkDef(c, f) { return f.split(' or ').some(w => typeMatchDef(D(c), w, c) || creTypes(D(c)).map(z => z.toLowerCase()).includes(w) || abOf(D(c)).kw.has('changeling') && /^[a-z]+$/.test(w) && !['artifact', 'creature', 'enchantment', 'land', 'instant', 'sorcery', 'planeswalker', 'aura', 'equipment'].includes(w)); }
+function l14AirDo(s, list, ctx) { for (const t of list) XOPS.avAirbend({ f: 'creature' }, ctx, t); }
+function l14RiteDo(s, o, op, src) { if (o == null || !alive(o)) return; if (G.p[o].life !== op.life) { log(`${pn(o)} no tiene exactamente ${op.life} vidas: no pasa nada.`); return; } damagePlayer(o, op.n, src); log(`${src ? cn(src) : 'El hechizo'} hace ${op.n} de daño a ${pn(o)}.`, 'bad'); }
+function l14TypePumpDo(s, type, op) { const list = permsOf(s).filter(c => isCreature(c) && (creTypes(D(c)).includes(type) || abOf(D(c)).kw.has('changeling'))); for (const c of list) { c.tp += op.p; c.tt += op.t; c.tkw.push(...op.kws); } log(`${pn(s)} elige ${type}: ${list.length ? list.map(cn).join(', ') + ` obtienen +${op.p}/+${op.t} y ganan ${op.kws.map(k => KW_ES[k] || k).join(' y ')}` : 'ninguna criatura'} hasta el final del turno.`); recomputeMods(); }
+function l14GambitDo(s, list, op, src) { for (const c of list) { if (c.zone !== 'bf') continue; dealDamage(c, op.dmg, src); c.x26NoBlk = G.turnsTaken; (c.l14NoBlk = G.turnsTaken); } if (list.length) log(`${src ? cn(src) : 'El hechizo'} hace ${op.dmg} de daño a ${list.map(cn).join(', ')}, que no pueden bloquear este turno.`); }
+function l14GaleDo(s, o, op, src) { if (o == null) return; for (const c of permsOf(o).filter(isCreature)) c.l14NoBlk = G.turnsTaken; const hit = permsOf(o).filter(c => isCreature(c) && (D(c).colors || []).some(k => op.cols.includes(k))); for (const c of hit) dealDamage(c, op.n, src); log(`Las criaturas de ${pn(o)} no pueden bloquear este turno${hit.length ? `; ${src ? cn(src) : 'el hechizo'} hace ${op.n} de daño a ${hit.map(cn).join(', ')}` : ''}.`, 'bad'); }
+{ const _cb14 = canBlock; canBlock = function (b, a) { if (b && b.l14NoBlk === G.turnsTaken) return false; return _cb14.apply(this, arguments); }; }
+function l14Lieut(s) { return permsOf(s).some(c => c.isCmd && c.owner === s); }
+function l14GearDo(s, o, draw, src) {
+  if (draw) { log(`${pn(o)} deja que ${pn(s)} robe tres cartas.`); drawCards(s, 3); return; }
+  const ml = millCards(s, 3); const tot = ml.reduce((n, c) => n + (D(c).cmc || 0), 0);
+  log(`${pn(o)} no deja robar: ${pn(s)} muele ${ml.map(cn).join(', ') || 'nada'}.`);
+  if (tot > 0 && alive(o)) { damagePlayer(o, tot, src); log(`${src ? cn(src) : 'La criatura'} hace ${tot} de daño a ${pn(o)}.`, 'bad'); }
+}
+CHGEN.l14Gearhulk = function* (s, op, ctx) {
+  const o = op.o; if (o == null) return; const title = chTitle(ctx, 'Combustible Gearhulk');
+  const i = yield { t: 'ask', o, labels: [`Que ${pn(s)} robe tres cartas`, `Que ${pn(s)} muela tres y te haga daño igual a su valor de maná total`], title: `${title}: elige`, ai: () => (G.p[o].life > 12 ? 1 : 0) };
+  l14GearDo(s, o, +i === 0, G.cards[op.src]);
+};
+CHWHO.l14Gearhulk = (s, op) => (op.o != null ? [op.o] : []);
+CHGEN.l14Blight = function* (s, op, ctx) {
+  const o = op.o; if (o == null || !alive(o)) return; const list = permsOf(o).filter(isCreature); if (!list.length) return;
+  const k = yield { t: 'ask', o, labels: list.map(cn), title: `${chTitle(ctx, 'Marchitar')}: pon ${op.n} contador${op.n > 1 ? 'es' : ''} -1/-1 en una criatura tuya`, ai: () => list.indexOf(x26BlightPick(o, list, op.n)) };
+  const c = list[+k] || list[0]; addCounters(c, op.n, 'm1', true); log(`${pn(o)} marchita ${op.n}: ${cn(c)}.`); try { fxEv('x26blight', { c, ctl: o, s: o, n: op.n }); } catch (e) { console.error(e); }
+};
+CHWHO.l14Blight = (s, op) => (op.o != null ? [op.o] : []);
+CHGEN.l14SacNon = function* (s, op, ctx) {
+  const o = op.o; if (o == null || !alive(o)) return; const list = permsOf(o).filter(c => isCreature(c) && !l14IsType(c, op.not)); if (!list.length) return;
+  const k = list.length === 1 ? 0 : yield { t: 'ask', o, labels: list.map(cn), title: `${chTitle(ctx, 'Sacrificio')}: sacrifica una criatura que no sea ${op.not}`, ai: () => list.indexOf(bestBy(list, c => -value(c) + (c.token ? 2 : 0))) };
+  const c = list[+k] || list[0]; log(`${pn(o)} sacrifica ${cn(c)}.`); sacrifice(c);
+};
+CHWHO.l14SacNon = (s, op) => (op.o != null ? [op.o] : []);
+function l14PyreList(s, share) { const sc = G.l14LastSac; if (!sc) return []; return G.p[s].lib.map(id => G.cards[id]).filter(c => /\bcreature\b/i.test(D(c).type_line || '') && (D(c).cmc || 0) === sc.mv + 1 && (!share || sc.changeling || abOf(D(c)).kw.has('changeling') || creTypes(D(c)).map(z => z.toLowerCase()).some(z => sc.types.includes(z)))); }
+function l14PutBf(s, c) { if (!c) return; moveCard(c, 'bf', { ctl: s }); log(`${pn(s)} pone ${cn(c)} en el campo.`); }
+function l14ReactorDo(s, src, pl, cre, n) { if (!n) { log(`${src ? cn(src) : 'El artefacto'} no tenía contadores de carga.`); return; } if (pl != null && alive(pl)) { damagePlayer(pl, n, src); log(`${cn(src)} hace ${n} de daño a ${pn(pl)}.`, 'bad'); } if (cre && cre.zone === 'bf') { dealDamage(cre, n, src); log(`${cn(src)} hace ${n} de daño a ${cn(cre)}.`); } }
+function l14AkiriDo(s, eq) { if (!eq) return; const h = G.cards[eq.att]; eq.att = null; log(`${pn(s)} desanexa ${cn(eq)}.`); if (h && h.zone === 'bf') { tapPerm(h); h.tkw.push('indestructible'); log(`${cn(h)} se gira y gana indestructible hasta el final del turno.`); } recomputeMods(); }
+function l14LuxaDo(s, c, ctx) { if (!c || c.zone !== 'bf') return; const n = c.cnt.flood || 0; c.cnt.flood = 0; if (!n) { c.cnt.flood = 1; log(`${cn(c)} recibe un contador de inundación; ${pn(s)} roba una carta.`); drawCards(s, 1); } else { applyOp({ k: 'x26Mana', n: 1, cols: ['C'] }, ctx, null); applyOp({ k: 'x26Mana', n: 1, cols: ['G'] }, ctx, null); applyOp({ k: 'x26Mana', n: 1, cols: ['U'] }, ctx, null); log(`${cn(c)} pierde sus contadores de inundación.`); } }
+function l14DblCtrDo(t) { if (!t || t.zone !== 'bf') return; const ks = Object.keys(t.cnt).filter(k => t.cnt[k] > 0); for (const k of ks) { const n = t.cnt[k]; if (k === 'p1' || k === 'm1') addCounters(t, n, k, true); else t.cnt[k] += n; } recomputeMods(); log(`Se doblan los contadores de ${cn(t)}.`); }
+Object.assign(XOPS, {
+  l14GetE(op, ctx) { const n = op.amt ? (ctx.amount || 0) : l14Amt(op.cnt, ctx); l14GetE(ctx.seat, n); },
+  l14TokX(op, ctx) { const n = l14Amt(op.cnt, ctx); if (!n) { log(`${pn(ctx.seat)} no crea fichas (X = 0).`); return; } applyOp(Object.assign({}, op.tok, { n, nAmt: false }), ctx, null); },
+  l14OppsLoseX(op, ctx) { const n = l14Amt(op.cnt, ctx); if (n) applyOp({ k: 'oppsLose', n }, ctx, null); },
+  l14PumpAllX(op, ctx) { const s = ctx.seat; const n = l14Amt(op.cnt, ctx); const list = permsOf(s).filter(isCreature); for (const c of list) { c.tp += n; c.tt += n; c.tkw.push(...op.kws); } recomputeMods(); log(`Las criaturas de ${pn(s)} obtienen +${n}/+${n}${op.kws.length ? ' y ganan ' + op.kws.map(k => KW_ES[k] || k).join(' y ') : ''} hasta el final del turno.`); },
+  l14ScryIfX(op, ctx) { if ((ctx.amount || 0) >= op.min) applyOp({ k: 'scry', n: op.n }, ctx, null); },
+  l14Slip(op, ctx, t) { if (!t || t.zone !== 'bf') return; const died = G.p.some(p => p.fxDiedT === G.turnsTaken && p.fxDiedN > 0); const [p, q] = died ? op.b : op.a; t.tp -= p; t.tt -= q; recomputeMods(); log(`${cn(t)} obtiene -${p}/-${q} hasta el final del turno${died ? ' (mórbido)' : ''}.`); },
+  l14Coup(op, ctx) { const s = ctx.seat; const X = ctx.amount || 0; const made = []; for (let i = 0; i < X && !tokenCap(s); i++) made.push(makeToken(s, op.spec)); log(`${pn(s)} crea ${made.length} ficha${made.length === 1 ? '' : 's'} de ${op.spec.name}.`); if (X >= op.min) { const ids = new Set(made.map(c => c.id)); const list = permsAll().filter(c => isCreature(c) && !ids.has(c.id)); for (const c of list) destroy(c); log(`Se destruyen las demás criaturas (${list.length}).`, 'bad'); } },
+  l14WipeNT(op, ctx) { const list = permsAll().filter(c => isCreature(c) && !c.token); for (const c of list) destroy(c); log(`Se destruyen todas las criaturas que no son fichas (${list.length}).`, 'bad'); },
+  l14UntapLands(op, ctx) { const ls = permsOf(ctx.seat).filter(c => isLand(c) && c.tapped).sort((a, b) => value(b) - value(a)).slice(0, op.n); ls.forEach(c => { c.tapped = false; }); if (ls.length) log(`${pn(ctx.seat)} endereza ${ls.length} tierra${ls.length > 1 ? 's' : ''}.`); },
+  l14RegenAll(op, ctx) { const list = permsOf(ctx.seat).filter(isCreature); for (const c of list) applyOp({ k: 'regenT', f: 'creature' }, ctx, c); },
+  l14Rite(op, ctx) { const s = ctx.seat; const o = l14Opps(s).find(q => G.p[q].life === op.life); if (o == null) { log('Ningún oponente tiene exactamente ' + op.life + ' vidas.'); return; } l14RiteDo(s, o, op, l14Src(ctx)); },
+  l14Hunger(op, ctx, t) { if (!t || t.zone !== 'bf') return; t.tkw.push('indestructible'); log(`${cn(t)} gana indestructible hasta el final del turno.`); if ((t.cnt.p1 || 0) > 0) drawCards(ctx.seat, 1); },
+  l14TypePump(op, ctx) { l14TypePumpDo(ctx.seat, commonType(ctx.seat), op); },
+  l14Raze(op, ctx, t) { if (!t || t.zone !== 'bf') return; const mv = D(t).cmc || 0; destroy(t); log(`Se destruye ${cn(t)}.`); if (mv <= 1) drawCards(ctx.seat, 1); },
+  l14Gambit(op, ctx) { const s = ctx.seat; const list = permsAll().filter(c => c.ctl !== s && l14CreOk(ctx, c)).sort((a, b) => (toughLeft(a) <= op.dmg ? -10 : 0) - (toughLeft(b) <= op.dmg ? -10 : 0) || value(b) - value(a)).slice(0, op.n); l14GambitDo(s, list, op, l14Src(ctx)); },
+  l14Gale(op, ctx) { const s = ctx.seat; const o = bestBy(l14Opps(s), q => permsOf(q).filter(isCreature).length + Math.random()); l14GaleDo(s, o, op, l14Src(ctx)); },
+  l14DrawArtMv(op, ctx) { const n = Math.max(0, ...permsOf(ctx.seat).filter(c => isType(c, 'artifact')).map(c => D(c).cmc || 0)); if (n) drawCards(ctx.seat, n); log(`${pn(ctx.seat)} roba ${n}.`); },
+  l14Culling(op, ctx) { const s = ctx.seat; const list = permsAll().filter(c => !isLand(c) && (D(c).cmc || 0) <= op.mv); let k = 0; for (const c of list) { destroy(c); if (c.zone !== 'bf') k++; } const col = isBotSeat(s) ? op.cols[0] : op.cols[0]; for (let i = 0; i < k; i++) applyOp({ k: 'x26Mana', n: 1, cols: op.cols.slice(), one: true }, ctx, null); log(`Se destruyen ${k} permanentes; ${pn(s)} añade ${k} de maná.`); void col; },
+  l14FestScry(op, ctx) { const s = ctx.seat; const types = new Set(); for (const c of permsOf(s).filter(isLand)) for (const w of ['plains', 'island', 'swamp', 'mountain', 'forest']) if (new RegExp('\\b' + w + '\\b', 'i').test(D(c).type_line || '')) types.add(w); if (types.size >= 3) applyOp({ k: 'scry', n: 1 }, ctx, null); },
+  l14Fabled(op, ctx) { const s = ctx.seat; const c = bestBy(G.p[s].lib.map(id => G.cards[id]).filter(x => /\bbasic\b/i.test(D(x).type_line || '') && isLand(x)), x => Math.random()); if (c) { moveCard(c, 'bf', { ctl: s, tapped: true }); log(`${pn(s)} pone ${cn(c)} en el campo girada.`); } shuffle(G.p[s].lib); if (c && c.zone === 'bf' && l14Lands(s) >= 4) { c.tapped = false; log(`${cn(c)} se endereza.`); } },
+  l14AirMany(op, ctx) { const s = ctx.seat; const src = l14Src(ctx); if (op.mine) return; const list = permsAll().filter(c => c.ctl !== s && avAirOk({ f: op.f, other: op.other }, ctx, { card: c })).sort((a, b) => value(b) - value(a)).slice(0, op.n); l14AirDo(s, list, ctx); void src; },
+  l14M1Src(op, ctx) { const c = l14Src(ctx); if (c && c.zone === 'bf') { addCounters(c, 1, 'm1', true); log(`${cn(c)} recibe un contador -1/-1.`); } },
+  l14Kederekt(op, ctx) { const s = ctx.seat; const o = ctx.that; const src = l14Src(ctx); if (o == null || !alive(o) || !permsOf(s).some(c => (D(c).colors || []).includes('R'))) return; damagePlayer(o, 1, src); log(`${cn(src)} hace 1 de daño a ${pn(o)}.`, 'bad'); },
+  l14LandsAmt(op, ctx) { const s = ctx.seat; const n = ctx.amount || 0; const lands = G.p[s].lib.map(id => G.cards[id]).filter(isLand).slice(0, n); for (const c of lands) moveCard(c, 'bf', { ctl: s, tapped: true }); shuffle(G.p[s].lib); if (lands.length) log(`${pn(s)} pone ${lands.length} tierra${lands.length > 1 ? 's' : ''} en el campo girada${lands.length > 1 ? 's' : ''}.`); },
+  l14RevAll(op, ctx) { const s = ctx.seat; const top = l13Dig(s, op.n); const ok = top.filter(c => l14TypeOkDef(c, op.f) && (!op.cre || /\bcreature\b/i.test(D(c).type_line || '')) && (op.mv == null || (D(c).cmc || 0) <= op.mv)); for (const c of ok) { if (op.to === 'bf') moveCard(c, 'bf', { ctl: s }); else moveCard(c, 'hand'); } log(`${pn(s)} revela ${top.map(cn).join(', ') || 'nada'}${ok.length ? `; ${ok.map(cn).join(', ')} va${ok.length > 1 ? 'n' : ''} ${op.to === 'bf' ? 'al campo' : 'a la mano'}` : ''}.`); l14Bottom(top.filter(c => !ok.includes(c))); },
+  l14PumpPerOther(op, ctx) { const c = l14Src(ctx); if (!c || c.zone !== 'bf') return; const n = permsOf(c.ctl).filter(x => x !== c && l14IsType(x, op.f)).length; if (!n) return; c.tp += n; c.tt += n; recomputeMods(); log(`${cn(c)} obtiene +${n}/+${n} hasta el final del turno.`); },
+  l14TutorBf(op, ctx) { const s = ctx.seat; const list = G.p[s].lib.map(id => G.cards[id]).filter(c => l14TypeOkDef(c, op.f) && (op.mv == null || (D(c).cmc || 0) <= op.mv)); const c = bestBy(list, x => (D(x).cmc || 0) + value(x) * 0.1); l14PutBf(s, c); shuffle(G.p[s].lib); },
+  l14Paragon(op, ctx, t) { if (!t || t.zone !== 'bf') return; if (l14IsType(t, op.sub)) { moveCard(t, 'exile'); log(`${cn(t)} es un ${op.sub}: se exilia.`, 'bad'); } else { destroy(t); log(`Se destruye ${cn(t)}.`, 'bad'); } },
+  l14Rosette(op, ctx) { const s = ctx.seat; const src = l14Src(ctx); const h = src && src.att != null ? G.cards[src.att] : null; const to = h && h.atk != null ? h.atk : G.fxAtkDef; if (!tokenCap(s)) { const tk = makeToken(s, { name: 'Astartes Warrior', p: 2, t: 2, colors: ['W'], kws: ['vigilance'], type: 'Token Creature — Astartes Warrior' }); if (to != null) { tk.atk = to; tk.attackedTurn = G.turnsTaken; } log(`${pn(s)} crea un Guerrero Astartes 2/2 atacando.`); } for (const c of permsAll()) if (c.atk != null && isCreature(c)) c.tkw.push('menace'); recomputeMods(); log('Las criaturas atacantes ganan amenaza hasta el final del turno.'); },
+  l14AtkKw(op, ctx) { const list = permsOf(ctx.seat).filter(c => c.atk != null && isCreature(c)); for (const c of list) c.tkw.push(...op.kws); recomputeMods(); if (list.length) log(`${list.map(cn).join(', ')} ganan ${op.kws.map(k => KW_ES[k] || k).join(' y ')} hasta el final del turno.`); },
+  l14Skyhunter(op, ctx) { const s = ctx.seat; const top = l13Dig(s, op.n); const eq = bestBy(top.filter(c => /\bequipment\b/i.test(D(c).type_line || '')), c => value(c)); if (eq) { moveCard(eq, 'bf', { ctl: s }); log(`${pn(s)} pone ${cn(eq)} en el campo.`); const h = bestBy(permsOf(s).filter(isCreature), c => value(c)); if (h && eq.zone === 'bf') attachTo(eq, h); } l14Bottom(top.filter(c => c !== eq)); },
+  l14Gearhulk(op, ctx) { const s = ctx.seat; const o = bestBy(l14Opps(s), q => G.p[q].life); const src = l14Src(ctx); if (o == null) return; chGo('l14Gearhulk', s, { o, src: src ? src.id : null }, ctx); },
+  l14Closet(op, ctx, t) { t = t || l14PickCloset.target(op, ctx); if (!t || t.zone !== 'bf' || t.ctl !== ctx.seat) return; const s = ctx.seat; moveCard(t, 'exile'); if (t.token || t.zone !== 'exile') { log(`${cn(t)} se exilia.`); return; } moveCard(t, 'bf', { ctl: s }); log(`${cn(t)} se exilia y vuelve al campo.`); },
+  l14Lieut(op, ctx) { const s = ctx.seat; if (!l14Lieut(s) || tokenCap(s)) return; const tk = makeToken(s, { name: 'Thopter', p: 1, t: 1, colors: [], kws: ['flying'], type: 'Token Artifact Creature — Thopter' }); tk.tkw.push('haste'); log(`${pn(s)} controla a su comandante: crea un Tóptero 1/1 volador con prisa.`); },
+  l14Luxa(op, ctx) { l14LuxaDo(ctx.seat, l14Src(ctx), ctx); },
+  l14Ripples(op, ctx) { const s = ctx.seat; const ml = millCards(s, op.n); log(`${pn(s)} muele ${ml.map(cn).join(', ') || 'nada'}.`); const c = bestBy(ml.filter(x => x.zone === 'gy'), x => value(x)); if (!c || G.p[s].life <= op.life + 6) return; const sol = solve(s, { generic: op.g, pips: [] }); if (!sol) return; pay(s, sol); loseLife(s, op.life); moveCard(c, 'hand'); log(`${pn(s)} paga {${op.g}} y ${op.life} vidas: ${cn(c)} va a su mano.`); },
+  l14ExileTypeDrain(op, ctx) { const s = ctx.seat; const c = bestBy(G.p[s].gy.map(id => G.cards[id]).filter(x => l14TypeOkDef(x, op.f)), x => -value(x)); if (!c) return; moveCard(c, 'exile'); log(`${pn(s)} exilia ${cn(c)} de su cementerio.`); applyOp({ k: 'oppsLose', n: op.n }, ctx, null); },
+  l14PayDraw(op, ctx) { const s = ctx.seat; if (G.p[s].life <= op.life + 5) return; const sol = solve(s, { generic: op.g, pips: [] }); if (!sol) return; pay(s, sol); loseLife(s, op.life); log(`${pn(s)} paga {${op.g}} y ${op.life} vida.`); drawCards(s, 1); },
+  l14RmUpTo(op, ctx, t) { t = t || l14PickRm.target(op, ctx); if (!t || t.zone !== 'bf') return; const mine = t.ctl === ctx.seat; let n = op.n; const order = mine ? ['m1', 'stun', ...Object.keys(t.cnt)] : ['p1', 'loy', 'charge', ...Object.keys(t.cnt)]; const gone = []; for (const k of order) { while (n > 0 && (t.cnt[k] || 0) > 0 && (!mine || ['m1', 'stun'].includes(k))) { t.cnt[k]--; n--; gone.push(ctrName(k)); } } recomputeMods(); if (gone.length) log(`Se quitan ${gone.length} contadores de ${cn(t)}.`); },
+  l14OppBlight(op, ctx) { for (const o of l14Opps(ctx.seat)) chGo('l14Blight', ctx.seat, { o, n: op.n }, ctx); },
+  l14Aetherhood(op, ctx) { const s = ctx.seat; const c = l14Src(ctx); if (!c || c.zone !== 'bf') return; l14GetE(s, Math.max(0, P(c))); const n = Math.floor(l14Energy(s) * 0.5); if (n > 0 && l14PayE(s, n)) { addCounters(c, n, 'p1', true); log(`${cn(c)} recibe ${n} contadores +1/+1.`); } },
+  l14BounceOthers(op, ctx) { const src = l14Src(ctx); const list = permsAll().filter(c => isCreature(c) && (!src || c.id !== src.id)); for (const c of list) moveCard(c, 'hand'); log(`Las demás criaturas vuelven a la mano de sus dueños (${list.length}).`, 'bad'); },
+  l14SelfBounce(op, ctx) { const c = l14Src(ctx); if (c && c.zone === 'bf') { moveCard(c, 'hand'); log(`${cn(c)} vuelve a la mano de ${pn(c.owner)}.`); } },
+  l14GyTop(op, ctx) { const s = ctx.seat; const c = bestBy(G.p[s].gy.map(id => G.cards[id]).filter(x => new RegExp('\\b' + op.f + '\\b', 'i').test(D(x).type_line || '')), x => value(x)); if (!c) return; moveCard(c, 'lib', { pos: 'top' }); log(`${pn(s)} pone ${cn(c)} encima de su biblioteca.`); },
+  l14DblCtr(op, ctx, t) { l14DblCtrDo(t || l14PickDbl.target(op, ctx)); },
+  l14DblPctr(op, ctx) { const p = pctr(G.p[ctx.seat]); const ks = Object.keys(p).filter(k => p[k] > 0 && k !== 'poison'); for (const k of ks) p[k] *= 2; if (ks.length) log(`${pn(ctx.seat)} dobla sus contadores (${ks.join(', ')}).`); },
+  l14Reactor(op, ctx) { const s = ctx.seat; const src = l14Src(ctx); const n = src ? ((src.zone === 'bf' ? src.cnt : src.lastCnt || src.cnt || {}).charge || 0) : 0; const pl = bestBy(l14Opps(s), q => -G.p[q].life); const cre = bestBy(permsAll().filter(c => c.ctl !== s && l14CreOk(ctx, c) && toughLeft(c) <= n), c => value(c)); l14ReactorDo(s, src, pl, cre, n); },
+  l14Akiri(op, ctx) { const s = ctx.seat; const eq = bestBy(permsOf(s).filter(x => isType(x, 'equipment') && x.att != null && G.cards[x.att] && G.cards[x.att].ctl === s), x => value(G.cards[x.att])); l14AkiriDo(s, eq); },
+  l14Pyre(op, ctx) { const s = ctx.seat; const c = bestBy(l14PyreList(s, op.share), x => value(x)); l14PutBf(s, c); shuffle(G.p[s].lib); },
+  l14ItKw(op, ctx) { const src = l14Src(ctx); if (!src) return; const c = src.att != null ? G.cards[src.att] : src; if (!c || c.zone !== 'bf') return; c.tkw.push(op.kw); recomputeMods(); log(`${cn(c)} gana ${KW_ES[op.kw] || op.kw} hasta el final del turno.`); },
+  l14EqPump(op, ctx) { const src = l14Src(ctx); const c = src && src.att != null ? G.cards[src.att] : null; if (!c || c.zone !== 'bf') return; c.tp += op.p; c.tt += op.t; recomputeMods(); log(`${cn(c)} obtiene +${op.p}/+${op.t} hasta el final del turno.`); },
+  l14Lose(op, ctx) { if (op.pl == null || !alive(op.pl)) return; loseLife(op.pl, op.n); log(`${pn(op.pl)} pierde ${op.n} vida.`, 'bad'); },
+  l14ToHand(op, ctx) { const c = G.cards[op.id]; if (!c || c.zone !== 'gy') return; moveCard(c, 'hand'); log(`${cn(c)} vuelve a la mano de ${pn(c.owner)}.`); },
+  l14AtkTok(op, ctx) { const s = ctx.seat; if (tokenCap(s)) return; const tk = makeToken(s, op.spec); tk.tapped = true; if (op.to != null && (typeof op.to !== 'number' || alive(op.to))) (G.fxAddAtk ||= []).push({ id: tk.id, to: op.to }); log(`${pn(s)} crea ${esc(op.spec.name)} 1/1 girada y atacando.`); },
+  l14KwOn(op, ctx) { const c = G.cards[op.id]; if (!c || c.zone !== 'bf') return; c.tkw.push(op.kw); recomputeMods(); log(`${cn(c)} gana ${KW_ES[op.kw] || op.kw} hasta el final del turno.`); },
+  l14BattleCry(op, ctx) { const c = l14Src(ctx); const list = permsOf(ctx.seat).filter(x => x.atk != null && isCreature(x) && (!c || x.id !== c.id)); for (const x of list) x.tp += 1; recomputeMods(); if (list.length) log(`Grito de batalla: ${list.map(cn).join(', ')} obtienen +1/+0.`); },
+  l14Ctr(op, ctx) { const c = l14Src(ctx); if (!c || c.zone !== 'bf') return; c.cnt[op.kind] = (c.cnt[op.kind] || 0) + op.n; log(`${cn(c)} recibe un contador (${op.kind}): ${c.cnt[op.kind]}.`); const lim = AB(c).l14Clock; if (lim && op.kind === 'hour' && c.cnt.hour >= lim && !c.l14Rang) { c.l14Rang = true; trigger(c, [{ k: 'l14Clock' }]); } },
+  l14Clock(op, ctx) { const s = ctx.seat; const p = G.p[s]; for (const id of [...p.hand, ...p.gy]) moveCard(G.cards[id], 'lib'); shuffle(p.lib); log(`${pn(s)} baraja su mano y su cementerio en su biblioteca y roba siete.`); drawCards(s, 7); const c = l14Src(ctx); if (c && c.zone === 'bf') moveCard(c, 'exile'); },
+  l14SacNon(op, ctx) { const o = ctx.that; if (o == null) return; chGo('l14SacNon', ctx.seat, { o, not: op.not }, ctx); },
+  l14Germ(op, ctx) { const s = ctx.seat; const eq = l14Src(ctx); if (tokenCap(s)) return; const g = makeToken(s, { name: 'Phyrexian Germ', p: 0, t: 0, colors: ['B'], type: 'Token Creature — Phyrexian Germ' }); log(`${pn(s)} crea un Germen pirexiano 0/0.`); if (eq && eq.zone === 'bf' && g.zone === 'bf') attachTo(eq, g); recomputeMods(); },
+  l14Crew(op, ctx) { const s = ctx.seat; const made = l14CrewMake(s); const eqs = permsOf(s).filter(c => isType(c, 'equipment') && !(c.att != null && G.cards[c.att] && G.cards[c.att].zone === 'bf' && !G.cards[c.att].token)).sort((a, b) => value(b) - value(a)); made.forEach((tk, i) => { if (eqs[i] && tk.zone === 'bf') attachTo(eqs[i], tk); }); recomputeMods(); },
+  l14TgtLoot(op, ctx) { l14LootDo(ctx.seat, op.n); },
+  l14Charge(op, ctx) { const c = l14Src(ctx); if (!c || c.zone !== 'bf') return; c.cnt.charge = (c.cnt.charge || 0) + op.n; log(`${cn(c)} recibe ${op.n} contadores de carga (${c.cnt.charge}).`); }
+});
+Object.assign(XPROMPT, {
+  async l14TgtLoot(op, pr) { const all = [pr.ctx.seat, ...l14Opps(pr.ctx.seat)]; const i = __R(ME, G, await askChoice(`${pr.title}: elige el jugador objetivo (roba ${op.n} y descarta una)`, all.map(pn))); const o = all[i != null && +i >= 0 ? +i : 0]; drawCards(o, op.n); log(`${pn(o)} roba ${op.n}.`); if (o === ME) { const c = __R(ME, G, await pickFromList(G.p[o].hand.map(id => G.cards[id]), `${pr.title}: descarta una carta`)); const d = c || G.cards[G.p[o].hand[0]]; if (d) { moveCard(d, 'gy'); log(`${pn(o)} descarta ${cn(d)}.`); } } else chGo('l14Disc', pr.ctx.seat, { o }, pr.ctx); },
+  async l14Crew(op, pr) { const s = pr.ctx.seat; const made = l14CrewMake(s); const used = new Set(); for (const tk of made) { const eqs = permsOf(s).filter(c => isType(c, 'equipment') && !used.has(c.id)); if (!eqs.length || tk.zone !== 'bf') break; const eq = __R(ME, G, await pickFromList(eqs, `${pr.title}: puedes anexar un Equipo a ${cn(tk)} (Cancelar = no)`)); if (!eq) continue; used.add(eq.id); attachTo(eq, tk); } recomputeMods(); },
+  async l14Rite(op, pr) { const os = l14Opps(pr.ctx.seat); const all = [...os, pr.ctx.seat]; const i = __R(ME, G, await askChoice(`${pr.title}: elige el jugador objetivo`, all.map(q => `${pn(q)} (${G.p[q].life} vidas)`))); l14RiteDo(pr.ctx.seat, all[i != null && +i >= 0 ? +i : 0], op, l14Src(pr.ctx)); },
+  async l14TypePump(op, pr) { const s = pr.ctx.seat; const opts = typeChoices(s); const i = __R(ME, G, await askChoice(`${pr.title}: elige un tipo de criatura`, opts)); l14TypePumpDo(s, opts[i != null && +i >= 0 ? +i : 0] || commonType(s), op); },
+  async l14Gambit(op, pr) { const got = __R(ME, G, await l10PickMany(pr, { k: 'l14GambitT' }, op.n, 'elige una criatura objetivo')); l14GambitDo(pr.ctx.seat, got, op, l14Src(pr.ctx)); },
+  async l14Gale(op, pr) { const os = l14Opps(pr.ctx.seat); const all = [...os, pr.ctx.seat]; const i = __R(ME, G, await askChoice(`${pr.title}: elige el jugador objetivo`, all.map(pn))); l14GaleDo(pr.ctx.seat, all[i != null && +i >= 0 ? +i : 0], op, l14Src(pr.ctx)); },
+  async l14Culling(op, pr) { const s = pr.ctx.seat; const list = permsAll().filter(c => !isLand(c) && (D(c).cmc || 0) <= op.mv); let k = 0; for (const c of list) { destroy(c); if (c.zone !== 'bf') k++; } log(`Se destruyen ${k} permanentes.`); if (!k) return; const i = __R(ME, G, await askChoice(`${pr.title}: ¿qué maná añades por cada permanente destruido (${k})?`, op.cols.map(x => `{${x}}`))); const col = op.cols[i != null && +i >= 0 ? +i : 0]; for (let j = 0; j < k; j++) applyOp({ k: 'x26Mana', n: 1, cols: [col] }, pr.ctx, null); },
+  async l14Fabled(op, pr) { const s = pr.ctx.seat; const list = G.p[s].lib.map(id => G.cards[id]).filter(x => /\bbasic\b/i.test(D(x).type_line || '') && isLand(x)); const c = list.length ? __R(ME, G, await pickFromList(list, `${pr.title}: elige una tierra básica`)) : null; if (c) { moveCard(c, 'bf', { ctl: s, tapped: true }); log(`${pn(s)} pone ${cn(c)} en el campo girada.`); } shuffle(G.p[s].lib); if (c && c.zone === 'bf' && l14Lands(s) >= 4) { c.tapped = false; log(`${cn(c)} se endereza.`); } },
+  async l14AirMany(op, pr) { const base = { k: 'l14AirT', f: op.f, other: op.other, mine: op.mine }; const got = __R(ME, G, await l10PickMany(pr, base, op.n === 99 ? 30 : op.n, 'elige un objetivo para airbend')); l14AirDo(pr.ctx.seat, got, pr.ctx); },
+  async l14Kederekt(op, pr) { const s = pr.ctx.seat; const o = pr.ctx.that; const src = l14Src(pr.ctx); if (o == null || !alive(o) || !permsOf(s).some(c => (D(c).colors || []).includes('R'))) return; if (!__R(ME, G, await askYesNo(pr.title, `¿Hacer 1 de daño a ${pn(o)}?`))) return; damagePlayer(o, 1, src); log(`${cn(src)} hace 1 de daño a ${pn(o)}.`, 'bad'); },
+  async l14LandsAmt(op, pr) { const s = pr.ctx.seat; const n = pr.ctx.amount || 0; const got = []; for (let i = 0; i < n; i++) { const list = G.p[s].lib.map(id => G.cards[id]).filter(x => isLand(x) && !got.includes(x)); if (!list.length) break; const c = __R(ME, G, await pickFromList(list, `${pr.title}: tierra ${i + 1} de ${n} (Cancelar = parar)`)); if (!c) break; got.push(c); } for (const c of got) moveCard(c, 'bf', { ctl: s, tapped: true }); shuffle(G.p[s].lib); if (got.length) log(`${pn(s)} pone ${got.map(cn).join(', ')} en el campo girada${got.length > 1 ? 's' : ''}.`); },
+  async l14TutorBf(op, pr) { const s = pr.ctx.seat; const list = G.p[s].lib.map(id => G.cards[id]).filter(c => l14TypeOkDef(c, op.f) && (op.mv == null || (D(c).cmc || 0) <= op.mv)); const c = list.length ? __R(ME, G, await pickFromList(list, `${pr.title}: elige una carta (Cancelar = ninguna)`)) : null; l14PutBf(s, c); shuffle(G.p[s].lib); },
+  async l14Skyhunter(op, pr) { const s = pr.ctx.seat; const top = l13Dig(s, op.n); const ok = top.filter(c => /\b(aura|equipment)\b/i.test(D(c).type_line || '')); const c = ok.length ? __R(ME, G, await pickFromList(ok, `${pr.title}: puedes poner un Aura o un Equipo en el campo (Cancelar = ninguno)`)) : null; if (c) { moveCard(c, 'bf', { ctl: s }); log(`${pn(s)} pone ${cn(c)} en el campo.`); if (c.zone === 'bf' && isType(c, 'equipment')) { const h = __R(ME, G, await pickFromList(permsOf(s).filter(isCreature), `${pr.title}: puedes anexar ${cn(c)} a una criatura tuya (Cancelar = no)`)); if (h) attachTo(c, h); } } l14Bottom(top.filter(x => x !== c)); },
+  async l14Gearhulk(op, pr) { const os = l14Opps(pr.ctx.seat); if (!os.length) return; const i = __R(ME, G, await askChoice(`${pr.title}: elige el oponente objetivo`, os.map(pn))); const src = l14Src(pr.ctx); chGo('l14Gearhulk', pr.ctx.seat, { o: os[i != null && +i >= 0 ? +i : 0], src: src ? src.id : null }, pr.ctx); },
+  async l14Closet(op, pr) { const s = pr.ctx.seat; const list = permsOf(s).filter(isCreature); if (!list.length) return; const t = __R(ME, G, await pickFromList(list, `${pr.title}: puedes exiliar una criatura tuya y devolverla (Cancelar = no)`)); if (t) XOPS.l14Closet(op, pr.ctx, t); },
+  async l14Ripples(op, pr) { const s = pr.ctx.seat; const ml = millCards(s, op.n); log(`${pn(s)} muele ${ml.map(cn).join(', ') || 'nada'}.`); const ok = ml.filter(x => x.zone === 'gy'); if (!ok.length || G.p[s].life < op.life) return; const c = __R(ME, G, await pickFromList(ok, `${pr.title}: puedes pagar {${op.g}} y ${op.life} vidas para poner una en tu mano (Cancelar = no)`)); if (!c) return; const sol = solve(s, { generic: op.g, pips: [] }); if (!sol) { toast('No tienes maná suficiente.'); return; } pay(s, sol); loseLife(s, op.life); moveCard(c, 'hand'); log(`${pn(s)} paga {${op.g}} y ${op.life} vidas: ${cn(c)} va a su mano.`); },
+  async l14ExileTypeDrain(op, pr) { const s = pr.ctx.seat; const list = G.p[s].gy.map(id => G.cards[id]).filter(x => l14TypeOkDef(x, op.f)); if (!list.length) return; const c = __R(ME, G, await pickFromList(list, `${pr.title}: puedes exiliar una carta de ${op.f} de tu cementerio (Cancelar = no)`)); if (!c) return; moveCard(c, 'exile'); log(`${pn(s)} exilia ${cn(c)} de su cementerio.`); applyOp({ k: 'oppsLose', n: op.n }, pr.ctx, null); },
+  async l14PayDraw(op, pr) { const s = pr.ctx.seat; if (G.p[s].life < op.life) return; if (!__R(ME, G, await askYesNo(pr.title, `¿Pagar {${op.g}} y ${op.life} vida para robar una carta?`))) return; const sol = solve(s, { generic: op.g, pips: [] }); if (!sol) { toast('No tienes maná suficiente.'); return; } pay(s, sol); loseLife(s, op.life); log(`${pn(s)} paga {${op.g}} y ${op.life} vida.`); drawCards(s, 1); },
+  async l14Aetherhood(op, pr) { const s = pr.ctx.seat; const c = l14Src(pr.ctx); if (!c || c.zone !== 'bf') return; l14GetE(s, Math.max(0, P(c))); const e = l14Energy(s); if (!e) return; const opts = Array.from({ length: e + 1 }, (_, i) => String(i)); const i = __R(ME, G, await askChoice(`${pr.title}: ¿cuánta energía pagas para poner contadores +1/+1? (tienes ${e})`, opts)); const n = +(i != null && +i >= 0 ? i : 0); if (n > 0 && l14PayE(s, n)) { addCounters(c, n, 'p1', true); log(`${cn(c)} recibe ${n} contadores +1/+1.`); } },
+  async l14GyTop(op, pr) { const s = pr.ctx.seat; const list = G.p[s].gy.map(id => G.cards[id]).filter(x => new RegExp('\\b' + op.f + '\\b', 'i').test(D(x).type_line || '')); if (!list.length) return; let c = null; for (let k = 0; !c && k < 40; k++) c = __R(ME, G, await pickFromList(list, `${pr.title}: elige la carta que pones encima de tu biblioteca`)); c = c || list[0]; moveCard(c, 'lib', { pos: 'top' }); log(`${pn(s)} pone ${cn(c)} encima de su biblioteca.`); },
+  async l14Reactor(op, pr) { const s = pr.ctx.seat; const src = l14Src(pr.ctx); const n = src ? ((src.zone === 'bf' ? src.cnt : src.lastCnt || src.cnt || {}).charge || 0) : 0; const all = [...l14Opps(s), s]; const i = __R(ME, G, await askChoice(`${pr.title}: elige el jugador objetivo (${n} de daño)`, all.map(pn))); const pl = all[i != null && +i >= 0 ? +i : 0]; const t = __R(ME, G, await pickTarget({ k: 'l14CreT' }, pr.ctx, `${pr.title}: elige hasta una criatura objetivo (Esc = ninguna)`)); l14ReactorDo(s, src, pl, t && t.card, n); },
+  async l14Akiri(op, pr) { const s = pr.ctx.seat; const list = permsOf(s).filter(x => isType(x, 'equipment') && x.att != null && G.cards[x.att] && G.cards[x.att].ctl === s); if (!list.length) return; const eq = __R(ME, G, await pickFromList(list, `${pr.title}: puedes desanexar un Equipo (Cancelar = no)`)); l14AkiriDo(s, eq); },
+  async l14Pyre(op, pr) { const s = pr.ctx.seat; const list = l14PyreList(s, op.share); const c = list.length ? __R(ME, G, await pickFromList(list, `${pr.title}: elige la criatura que pones en el campo`)) : null; l14PutBf(s, c); shuffle(G.p[s].lib); },
+  async l14RmUpTo(op, pr) { const t = __R(ME, G, await pickTarget({ k: 'l14RmT' }, pr.ctx, `${pr.title}: elige un permanente objetivo`)); const c = t && t.card; if (!c || c.zone !== 'bf') return; let n = op.n; while (n > 0) { const ks = Object.keys(c.cnt).filter(k => c.cnt[k] > 0); if (!ks.length) break; const i = __R(ME, G, await askChoice(`${pr.title}: quita un contador de ${cn(c)} (${op.n - n + 1} de ${op.n})`, [...ks.map(k => `${ctrName(k)} (${c.cnt[k]})`), 'Parar'])); if (i == null || +i < 0 || +i >= ks.length) break; c.cnt[ks[+i]]--; n--; } recomputeMods(); },
+  async l14DblCtr(op, pr) { const t = __R(ME, G, await pickTarget({ k: 'l14RmT' }, pr.ctx, `${pr.title}: elige un permanente objetivo`)); l14DblCtrDo(t && t.card); }
+});
+EOE_TGT.l14GambitT = { valid: (op, ctx, x) => !!(x && x.card && !(op.excl && op.excl.has(x.card.id)) && l14CreOk(ctx, x.card)), target: () => null };
+EOE_TGT.l14AirT = { valid: (op, ctx, x) => !!(x && x.card && !(op.excl && op.excl.has(x.card.id)) && avAirOk(op, ctx, x)), target: () => null };
+EOE_TGT.l14RmT = { valid: (op, ctx, x) => !!(x && x.card && x.card.zone === 'bf' && (x.card.ctl === ctx.seat || !hasKw(x.card, 'hexproof')) && !hasKw(x.card, 'shroud')), target: () => null };
+EOE_TGT.l14CreT = { valid: (op, ctx, x) => l14CreOk(ctx, x && x.card), target: () => null };
+function l14LootDo(s, n) { drawCards(s, n); const c = l11DiscardPick(s, G.p[s].hand.map(id => G.cards[id])); if (c) { moveCard(c, 'gy'); log(`${pn(s)} roba ${n} y descarta ${cn(c)}.`); } }
+CHGEN.l14Disc = function* (s, op, ctx) { const o = op.o; const hand = G.p[o].hand.map(id => G.cards[id]); if (!hand.length) return; const k = yield { t: 'ask', o, labels: hand.map(cn), title: `${chTitle(ctx, 'Descartar')}: descarta una carta`, ai: () => hand.indexOf(l11DiscardPick(o, hand)) }; const c = hand[+k] || hand[0]; moveCard(c, 'gy'); log(`${pn(o)} descarta ${cn(c)}.`); };
+CHWHO.l14Disc = (s, op) => (op.o != null ? [op.o] : []);
+function l14CrewMake(s) { const n = permsOf(s).filter(c => isType(c, 'vehicle') || isType(c, 'equipment')).length; const made = []; for (let i = 0; i < n && !tokenCap(s); i++) made.push(makeToken(s, { name: 'Dwarf Berserker', p: 2, t: 1, colors: ['R'], type: 'Token Creature — Dwarf Berserker' })); log(`${pn(s)} crea ${made.length} Enano${made.length === 1 ? '' : 's'} Berserker 2/1.`); return made; }
+// «Comprobar cartas» shows the extra costs (energy, tapping creatures…) of an activated ability
+{ const _al14 = actLabel; actLabel = function (act) { const r = _al14.apply(this, arguments); try { const xs = (act && act.xc || []).map(x26XcLabel); if (!xs.length) return r; return r.replace(/^(Activar \()([^)]*)\)/, (m0, a, b) => a + [b === 'gratis' ? '' : b, ...xs].filter(Boolean).join(', ') + ')'); } catch (e) { return r; } }; }
+// «Comprobar cartas»: damage that depends on what you control is shown as X
+{ for (const k of ['x26Dmg', 'x26DmgEachOpp']) { const _t = XTEXT[k]; if (_t) XTEXT[k] = o => o && o.l14n ? _t(Object.assign({}, o, { n: 'x' })).replace(/\b0 de daño/, 'X de daño') : _t(o); } }
+// a spell read whole by this block: the leftover warning of its separate lines is not a real one
+const L14_WHOLE = new Set(['l14Slip', 'l14Coup', 'l14Crew']);
+{ const _ab14 = abOf; abOf = function (d) { const a = _ab14.apply(this, arguments); try { if (a && a !== EMPTY_AB && !a._l14w && a.spell && a.spell.some(o => L14_WHOLE.has(o.k) || o.l14n === 'raid')) { a._l14w = true; a.unparsed = []; } } catch (e) { console.error(e); } return a; }; }
+Object.assign(XTEXT, {
+  l14Crew: () => 'Crear X Enanos Berserker 2/1 y anexarles Equipos', l14TgtLoot: o => `Un jugador roba ${o.n} y descarta una`,
+  l14GetE: o => o.amt ? 'Obtener tanta energía como daño' : 'Obtener energía', l14TokX: o => `Crear X fichas de ${o.tok.name || (o.tok.spec && o.tok.spec.name) || 'criatura'}`, l14OppsLoseX: () => 'Cada oponente pierde X vidas',
+  l14PumpAllX: o => `Tus criaturas obtienen +X/+X${o.kws.length ? ' y ' + o.kws.map(k => KW_ES[k] || k).join(', ') : ''}`, l14ScryIfX: o => `Si X es ${o.min} o más, adivinar ${o.n}`, l14Slip: o => `Una criatura obtiene -${o.a[0]}/-${o.a[1]} (mórbido: -${o.b[0]}/-${o.b[1]})`,
+  l14Coup: o => `Crear X ${o.spec.name}; si X ≥ ${o.min}, destruir las demás criaturas`, l14WipeNT: () => 'Destruir todas las criaturas que no son fichas', l14UntapLands: o => o.n >= 999 ? 'Enderezar todas tus tierras' : `Enderezar hasta ${o.n} tierras`,
+  l14RegenAll: () => 'Regenerar cada criatura tuya', l14Rite: o => `Si un jugador tiene exactamente ${o.life} vidas, ${o.n} de daño`, l14Hunger: () => 'Indestructible; roba si tiene un contador +1/+1',
+  l14TypePump: o => `Elegir un tipo: tus criaturas de ese tipo +${o.p}/+${o.t} y ${o.kws.map(k => KW_ES[k] || k).join(', ')}`, l14Raze: () => 'Destruir un artefacto; si su valor era 1 o menos, robar', l14Gambit: o => `${o.dmg} de daño a hasta ${o.n} criaturas, que no pueden bloquear`,
+  l14Gale: o => `Las criaturas de un jugador no pueden bloquear; ${o.n} de daño a las blancas y/o azules`, l14DrawArtMv: () => 'Robar tantas como el mayor valor de maná de tus artefactos', l14Culling: o => `Destruir los permanentes no tierra de valor ${o.mv} o menos y añadir maná`,
+  l14FestScry: () => 'Si tienes tres tipos de tierra básica, adivinar 1', l14Fabled: () => 'Buscar una tierra básica girada; con cuatro tierras, enderezarla', l14AirMany: o => `Airbend ${o.n === 99 ? 'los objetivos que quieras' : 'hasta ' + o.n + ' objetivos'}`,
+  l14M1Src: () => 'Un contador -1/-1 en esta criatura', l14Kederekt: () => 'Si controlas un permanente rojo, puedes hacerle 1 de daño', l14LandsAmt: () => 'Buscar tantas tierras como daño y ponerlas giradas', l14RevAll: o => `Revelar ${o.n}: todas las de ${o.f} ${o.to === 'bf' ? 'al campo' : 'a la mano'}`,
+  l14PumpPerOther: o => `+1/+1 por cada otro ${o.f}`, l14TutorBf: o => `Buscar una carta de ${o.f} y ponerla en el campo`, l14Paragon: o => `Destruir una criatura atacante (si es ${o.sub}, exiliarla)`, l14Rosette: () => 'Ficha 2/2 atacando; las atacantes ganan amenaza',
+  l14AtkKw: o => `Tus atacantes ganan ${o.kws.map(k => KW_ES[k] || k).join(', ')}`, l14Skyhunter: o => `Mirar ${o.n}: puedes poner un Aura o Equipo en el campo`, l14Gearhulk: () => 'Un oponente elige: robas tres, o mueles tres y le haces daño', l14Closet: () => 'Puedes exiliar una criatura tuya y devolverla',
+  l14Lieut: () => 'Si controlas a tu comandante, Tóptero 1/1 con prisa', l14Luxa: () => 'Contadores de inundación: robar o añadir {C}{G}{U}', l14Ripples: o => `Moler ${o.n}; puedes pagar {${o.g}} y ${o.life} vidas por una de ellas`, l14ExileTypeDrain: o => `Puedes exiliar una carta de ${o.f}: cada oponente pierde ${o.n}`,
+  l14PayDraw: o => `Puedes pagar {${o.g}} y ${o.life} vida para robar`, l14RmUpTo: o => `Quitar hasta ${o.n} contadores de un permanente`, l14OppBlight: o => `Cada oponente marchita ${o.n}`, l14Aetherhood: () => 'Energía igual a su fuerza; puedes pagarla por contadores',
+  l14BounceOthers: () => 'Devolver las demás criaturas a la mano', l14SelfBounce: () => 'Volver a la mano de su dueño', l14GyTop: o => `Poner una carta de ${o.f} de tu cementerio encima de tu biblioteca`, l14DblCtr: () => 'Doblar los contadores de un permanente', l14DblPctr: () => 'Doblar tus contadores',
+  l14Reactor: () => 'Daño igual a sus contadores de carga a un jugador y a hasta una criatura', l14Akiri: () => 'Puedes desanexar un Equipo: la criatura se gira y gana indestructible', l14Pyre: o => `Buscar una criatura de valor +1${o.share ? ' que comparta tipo' : ''} y ponerla en el campo`,
+  l14ItKw: o => `Gana ${KW_ES[o.kw] || o.kw}`, l14EqPump: o => `La criatura equipada obtiene +${o.p}/+${o.t}`, l14Lose: o => `Pierde ${o.n} vida`, l14ToHand: () => 'Devolver esa carta a la mano', l14AtkTok: o => `Crear ${o.spec.name} atacando`, l14KwOn: o => `Gana ${KW_ES[o.kw] || o.kw}`,
+  l14BattleCry: () => 'Grito de batalla', l14Ctr: o => `Un contador (${o.kind})`, l14Clock: () => 'Barajar mano y cementerio y robar siete', l14SacNon: o => `Ese jugador sacrifica una criatura que no sea ${o.not}`, l14Germ: () => 'Germen 0/0 y anexarlo', l14Charge: o => `${o.n} contadores de carga`
+});
 </script>
 
 <script src="/config.js"></script>
